@@ -1,0 +1,15 @@
+node_modules/
+**/node_modules/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+crypto-squeeze-radar/logs/
+crypto-squeeze-radar/storage/*.sqlite3
+crypto-squeeze-radar/storage/*.csv
+crypto-squeeze-radar/output/
+crypto-squeeze-radar/web/data.js
+
+vercel-site/
+.vercel/
+**/.vercel/

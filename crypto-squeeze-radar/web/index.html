@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crypto Squeeze Radar</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">CSR</div>
+          <div>
+            <strong>Crypto Squeeze Radar</strong>
+            <span>异常监控</span>
+          </div>
+        </div>
+        <nav class="nav-list" aria-label="主导航">
+          <a class="active" href="#overview">总览</a>
+          <a href="#signals">信号</a>
+          <a href="#history">历史</a>
+          <a href="#tweets">推文</a>
+        </nav>
+        <div class="side-note">
+          <span>风险提示</span>
+          <p>本面板只展示市场结构异常，不构成投资建议。</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>Crypto Squeeze Radar</h1>
+            <p id="lastUpdated">正在读取最新监控数据</p>
+          </div>
+          <div class="top-actions">
+            <button id="refreshBtn" type="button">刷新</button>
+            <div id="postState" class="status-pill">Dry run</div>
+          </div>
+        </header>
+
+        <section class="motion-panel" aria-label="异常监控扫描动图">
+          <div class="motion-copy">
+            <span class="eyebrow">Live anomaly scan</span>
+            <h2>市场仓位异常扫描中</h2>
+            <p id="radarSummary">正在同步最新风险评分、OI 变化和清算数据。</p>
+            <div class="motion-stats">
+              <span><strong id="radarCoinCount">--</strong> 交易对</span>
+              <span><strong id="radarPulseValue">--</strong> 最高风险</span>
+              <span><strong id="radarCandidateCount">--</strong> 发布候选</span>
+            </div>
+          </div>
+          <img class="motion-visual" src="./radar-scan.svg" alt="仓位异常雷达扫描动图" />
+        </section>
+
+        <section id="overview" class="metric-grid" aria-label="监控摘要">
+          <article class="metric">
+            <span>最高风险评分</span>
+            <strong id="maxRisk">--</strong>
+            <small>0-100</small>
+          </article>
+          <article class="metric">
+            <span>发布候选</span>
+            <strong id="publishCandidates">--</strong>
+            <small>risk_score >= 70</small>
+          </article>
+          <article class="metric">
+            <span>推文草稿</span>
+            <strong id="tweetCount">--</strong>
+            <small>Top 5</small>
+          </article>
+          <article class="metric">
+            <span>X 发布模式</span>
+            <strong id="xMode">--</strong>
+            <small id="xThreshold">阈值 --</small>
+          </article>
+        </section>
+
+        <section class="grid-main">
+          <article id="signals" class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <h2>Top 异常信号</h2>
+                <p>按风险评分排序，优先观察仓位拥挤与 OI 异常。</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>币种</th>
+                    <th>评分</th>
+                    <th>标签</th>
+                    <th>价格</th>
+                    <th>Funding</th>
+                    <th>OI 1h</th>
+                    <th>OI 24h</th>
+                  </tr>
+                </thead>
+                <tbody id="signalRows"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>风险分布</h2>
+                <p>最新一轮各币种评分。</p>
+              </div>
+            </div>
+            <div id="riskBars" class="risk-bars"></div>
+          </article>
+        </section>
+
+        <section id="history" class="grid-main">
+          <article class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <h2>风险评分趋势</h2>
+                <p>最近历史记录，用于观察异常是否持续。</p>
+              </div>
+              <select id="symbolSelect" aria-label="选择交易对"></select>
+            </div>
+            <svg id="riskChart" class="chart" viewBox="0 0 760 280" role="img" aria-label="风险评分趋势图"></svg>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>杠杆热度</h2>
+                <p>Funding、OI 与清算组合观察。</p>
+              </div>
+            </div>
+            <div id="heatCards" class="heat-list"></div>
+          </article>
+        </section>
+
+        <section id="tweets" class="grid-main">
+          <article class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <h2>推文审核队列</h2>
+                <p>默认 dry-run，只预览不发布。</p>
+              </div>
+            </div>
+            <div id="tweetList" class="tweet-list"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>X 发布预览</h2>
+                <p>展示本轮自动发布过滤结果。</p>
+              </div>
+            </div>
+            <div id="xPreview" class="preview-list"></div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script src="./data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

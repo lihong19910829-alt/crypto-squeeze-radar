@@ -1,0 +1,34 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/crypto-squeeze-radar/web/index.html"
+    },
+    {
+      "source": "/app.js",
+      "destination": "/crypto-squeeze-radar/web/app.js"
+    },
+    {
+      "source": "/styles.css",
+      "destination": "/crypto-squeeze-radar/web/styles.css"
+    },
+    {
+      "source": "/data.js",
+      "destination": "/crypto-squeeze-radar/web/data.js"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ]
+}
+

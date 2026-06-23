@@ -1,0 +1,65 @@
+<svg width="640" height="240" viewBox="0 0 640 240" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Market anomaly radar animation</title>
+  <desc id="desc">Animated radar sweep with signal points for crypto squeeze monitoring.</desc>
+  <defs>
+    <radialGradient id="radarGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2364D2" stop-opacity="0.42"/>
+      <stop offset="58%" stop-color="#0F8A5F" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#101722" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="beam" x1="320" y1="120" x2="554" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4EA0FF" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#4EA0FF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="640" height="240" rx="8" fill="#101722"/>
+  <rect x="18" y="18" width="604" height="204" rx="8" fill="#141E2C" stroke="#26364D"/>
+  <circle cx="320" cy="120" r="96" fill="url(#radarGlow)"/>
+  <circle cx="320" cy="120" r="32" stroke="#334762" stroke-width="1.4"/>
+  <circle cx="320" cy="120" r="64" stroke="#334762" stroke-width="1.4"/>
+  <circle cx="320" cy="120" r="96" stroke="#334762" stroke-width="1.4"/>
+  <path d="M224 120H416" stroke="#334762" stroke-width="1.4"/>
+  <path d="M320 24V216" stroke="#334762" stroke-width="1.4"/>
+
+  <g filter="url(#softGlow)">
+    <g transform-origin="320 120">
+      <path d="M320 120L554 50C565 87 565 153 554 190L320 120Z" fill="url(#beam)" opacity="0.86"/>
+      <line x1="320" y1="120" x2="554" y2="120" stroke="#72B7FF" stroke-width="2"/>
+      <animateTransform attributeName="transform" attributeType="XML" type="rotate" from="0 320 120" to="360 320 120" dur="4.8s" repeatCount="indefinite"/>
+    </g>
+  </g>
+
+  <g>
+    <circle cx="268" cy="78" r="4" fill="#F6C453">
+      <animate attributeName="r" values="4;8;4" dur="1.7s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.95;0.35;0.95" dur="1.7s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="382" cy="88" r="5" fill="#E35D54">
+      <animate attributeName="r" values="5;10;5" dur="2.1s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.95;0.28;0.95" dur="2.1s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="356" cy="162" r="4.5" fill="#40C896">
+      <animate attributeName="r" values="4.5;8.5;4.5" dur="1.9s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.9;0.32;0.9" dur="1.9s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="300" cy="136" r="3.5" fill="#72B7FF">
+      <animate attributeName="r" values="3.5;7;3.5" dur="1.55s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.55s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <path d="M68 176C104 138 139 154 174 116C203 84 233 86 268 78" stroke="#72B7FF" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="6 9" opacity="0.74">
+    <animate attributeName="stroke-dashoffset" from="0" to="-90" dur="3.5s" repeatCount="indefinite"/>
+  </path>
+  <path d="M372 154C410 110 458 131 498 84C520 58 548 58 574 66" stroke="#40C896" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="6 9" opacity="0.68">
+    <animate attributeName="stroke-dashoffset" from="0" to="-90" dur="3.1s" repeatCount="indefinite"/>
+  </path>
+</svg>

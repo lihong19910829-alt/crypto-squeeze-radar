@@ -1,0 +1,11 @@
+*
+!vercel.json
+!crypto-squeeze-radar/
+crypto-squeeze-radar/*
+!crypto-squeeze-radar/web/
+!crypto-squeeze-radar/web/index.html
+!crypto-squeeze-radar/web/app.js
+!crypto-squeeze-radar/web/styles.css
+!crypto-squeeze-radar/web/radar-scan.svg
+!crypto-squeeze-radar/web/data.js
+!crypto-squeeze-radar/web/vercel.json
