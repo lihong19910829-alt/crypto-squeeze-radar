@@ -48,7 +48,7 @@ class RadarRequestHandler(SimpleHTTPRequestHandler):
 
 def build_summary() -> dict[str, object]:
     """读取最新一轮数据，生成仪表盘摘要。"""
-    rows = load_latest_snapshots()
+    rows = add_first_alert_times(load_latest_snapshots())
     x_preview = read_json_file(X_POST_PREVIEW_JSON_FILE, {})
     tweets = read_json_file(TWEETS_JSON_FILE, [])
     high_risk = [row for row in rows if (row.get("risk_score") or 0) >= 70]
@@ -87,6 +87,39 @@ def load_latest_snapshots() -> list[dict[str, object]]:
         ORDER BY risk_score DESC, symbol ASC
     """
     return query_rows(sql)
+
+
+def add_first_alert_times(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """为最新异常信号补充首次提示时间。正常信号不显示首次提示。"""
+    if not rows or not SQLITE_DB_FILE.exists():
+        return rows
+
+    with sqlite3.connect(SQLITE_DB_FILE) as conn:
+        for row in rows:
+            tag = str(row.get("anomaly_tag") or "")
+            symbol = row.get("symbol")
+            if not symbol or _is_normal_tag(tag):
+                row["first_alert_at"] = None
+                continue
+            first_seen = conn.execute(
+                """
+                SELECT MIN(timestamp_utc)
+                FROM market_snapshots
+                WHERE symbol = ?
+                  AND anomaly_tag = ?
+                  AND anomaly_tag NOT IN ('正常', '姝ｅ父')
+                """,
+                (symbol, tag),
+            ).fetchone()[0]
+            row["first_alert_at"] = first_seen
+
+    return rows
+
+
+def _is_normal_tag(tag: str) -> bool:
+    """兼容早期乱码数据和当前中文正常标签。"""
+    cleaned = tag.strip()
+    return cleaned in {"", "正常", "姝ｅ父"}
 
 
 def load_history(limit: int) -> list[dict[str, object]]:
@@ -130,4 +163,3 @@ def run(host: str = "127.0.0.1", port: int = 8765) -> None:
 
 if __name__ == "__main__":
     run()
-

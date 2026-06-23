@@ -9,7 +9,7 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 
 document.addEventListener("DOMContentLoaded", () => {
-  $("#refreshBtn").addEventListener("click", loadDashboard);
+  $("#refreshBtn").addEventListener("click", () => loadDashboard({ forceRefresh: true }));
   $("#symbolSelect").addEventListener("change", (event) => {
     state.selectedSymbol = event.target.value;
     renderChart();
@@ -17,8 +17,8 @@ document.addEventListener("DOMContentLoaded", () => {
   loadDashboard();
 });
 
-async function loadDashboard() {
-  const embedded = window.RADAR_DATA;
+async function loadDashboard(options = {}) {
+  const embedded = options.forceRefresh ? await loadStaticData() : window.RADAR_DATA;
   let summary;
   let history;
   let tweets;
@@ -46,6 +46,23 @@ async function loadDashboard() {
   state.xPreview = xPreview;
   state.selectedSymbol = state.selectedSymbol || summary.top?.[0]?.symbol || history[0]?.symbol || "";
   renderAll();
+}
+
+async function loadStaticData() {
+  try {
+    const response = await fetch(`./data.js?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`data.js ${response.status}`);
+    const text = await response.text();
+    const jsonText = text
+      .replace(/^window\.RADAR_DATA\s*=\s*/, "")
+      .replace(/;\s*$/, "");
+    const parsed = JSON.parse(jsonText);
+    window.RADAR_DATA = parsed;
+    return parsed;
+  } catch (error) {
+    console.warn("Static data refresh failed, using embedded data", error);
+    return window.RADAR_DATA;
+  }
 }
 
 async function fetchJson(url) {
@@ -108,6 +125,7 @@ function renderSignals() {
           <td>${formatPercent((item.funding_rate || 0) * 100)}</td>
           <td>${formatPercent(item.oi_change_1h)}</td>
           <td>${formatPercent(item.oi_change_24h)}</td>
+          <td>${formatFirstAlert(item.first_alert_at)}</td>
         </tr>
       `;
     })
@@ -258,6 +276,11 @@ function coinFromSymbol(symbol = "") {
 function formatTime(value) {
   if (!value) return "--";
   return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatFirstAlert(value) {
+  if (!value) return "--";
+  return formatTime(value);
 }
 
 function formatNumber(value, digits = 2) {
