@@ -1,6 +1,9 @@
 name: Cloud Crypto Radar
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     # GitHub Actions 使用 UTC；每小时第 7 分钟运行，避开整点拥堵。
     - cron: "7 * * * *"
