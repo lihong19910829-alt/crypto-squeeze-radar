@@ -1,0 +1,79 @@
+name: Cloud Crypto Radar
+
+on:
+  schedule:
+    # GitHub Actions 使用 UTC；每小时第 7 分钟运行，避开整点拥堵。
+    - cron: "7 * * * *"
+    # 每月写入一次保活记录，防止公开仓库因 60 天无活动而停用定时任务。
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: cloud-crypto-radar
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  update-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore radar history
+        uses: actions/cache@v4
+        with:
+          path: |
+            crypto-squeeze-radar/storage/history.csv
+            crypto-squeeze-radar/storage/radar_history.sqlite3
+          key: radar-storage-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            radar-storage-${{ runner.os }}-
+
+      - name: Fetch market data
+        working-directory: crypto-squeeze-radar
+        env:
+          POST_TO_X: "false"
+          MONITOR_ALL_BINANCE_SYMBOLS: "true"
+          MAX_BINANCE_SYMBOLS: "0"
+          ENABLE_BINANCE_FORCE_ORDERS: "false"
+        run: |
+          python main.py
+          python export_dashboard_data.py
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload dashboard
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: crypto-squeeze-radar/web
+
+      - name: Publish dashboard
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Keep scheduled workflow active
+        if: github.event_name == 'schedule' && github.event.schedule == '17 3 1 * *'
+        run: |
+          mkdir -p .cloud
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .cloud/last-keepalive.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .cloud/last-keepalive.txt
+          git commit -m "chore: keep cloud radar schedule active"
+          git push
