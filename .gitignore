@@ -7,7 +7,8 @@ __pycache__/
 crypto-squeeze-radar/logs/
 crypto-squeeze-radar/storage/*.sqlite3
 crypto-squeeze-radar/storage/*.csv
-crypto-squeeze-radar/output/
+crypto-squeeze-radar/output/*
+!crypto-squeeze-radar/output/*.py
 crypto-squeeze-radar/web/data.js
 
 vercel-site/
