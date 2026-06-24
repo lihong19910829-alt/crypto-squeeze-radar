@@ -51,7 +51,9 @@ jobs:
         working-directory: crypto-squeeze-radar
         env:
           POST_TO_X: "false"
-          MONITOR_ALL_BINANCE_SYMBOLS: "true"
+          # GitHub 的美国托管节点会被 Binance Futures 返回 451；
+          # 使用核心观察列表并自动回退到 Hyperliquid 公共数据源。
+          MONITOR_ALL_BINANCE_SYMBOLS: "false"
           MAX_BINANCE_SYMBOLS: "0"
           ENABLE_BINANCE_FORCE_ORDERS: "false"
         run: |

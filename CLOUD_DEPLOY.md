@@ -5,6 +5,7 @@
 ## 工作方式
 
 - GitHub Actions 每小时第 7 分钟自动抓取一次市场数据。
+- 云端节点监控 BTC、ETH、SOL、HYPE，并在 Binance 受地区限制时自动使用 Hyperliquid 公共数据；本机版仍可继续使用 Binance 全市场模式。
 - 历史 CSV 和 SQLite 数据保存在 GitHub Actions 缓存中，不会公开提交到仓库。
 - 每次更新完成后，GitHub Pages 自动发布最新仪表盘。
 - `POST_TO_X` 固定为 `false`，云端任务不会自动发布推文。
