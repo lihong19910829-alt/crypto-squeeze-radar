@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from config import TWEETS_JSON_FILE, TWEETS_MD_FILE
+from indicators.outcome_probability import format_outcome_probability
 
 
 def build_tweet(item: dict[str, Any]) -> str:
@@ -20,13 +21,15 @@ def build_tweet(item: dict[str, Any]) -> str:
     funding = _fmt_pct((item.get("funding_rate") or 0) * 100 if item.get("funding_rate") is not None else None)
 
     direction = _direction_text(item)
+    outcome = format_outcome_probability(item)
     return (
         f"🚨 {coin} 杠杆风险{level}\n"
         f"风险评分：{score}/100，标签：{tags}\n"
         f"过去1小时OI变化：{oi_1h}；24小时OI变化：{oi_24h}；Funding：{funding}。\n"
         f"{direction}\n"
         f"仅用于市场结构观察，不构成投资建议。\n"
-        f"#{coin} #Crypto"
+        f"#{coin} #Crypto\n"
+        f"{outcome}"
     )
 
 
@@ -40,6 +43,7 @@ def save_tweets(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "risk_score": item["risk_score"],
             "risk_level": item["risk_level"],
             "tags": item["tags"],
+            "outcome_probability": item.get("outcome_probability"),
             "created_at_utc": now,
             "tweet": build_tweet(item),
         }
@@ -80,4 +84,3 @@ def _fmt_pct(value: float | None) -> str:
     if value is None:
         return "暂无数据"
     return f"{value:.2f}%"
-

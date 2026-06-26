@@ -8,7 +8,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from config import BASE_DIR, SQLITE_DB_FILE, TWEETS_JSON_FILE, X_POST_PREVIEW_JSON_FILE
+from config import BASE_DIR, SQLITE_DB_FILE, TOP_N, TWEETS_JSON_FILE, X_POST_PREVIEW_JSON_FILE
+from indicators.outcome_probability import estimate_outcome_probability
 
 
 WEB_DIR = BASE_DIR / "web"
@@ -48,7 +49,7 @@ class RadarRequestHandler(SimpleHTTPRequestHandler):
 
 def build_summary() -> dict[str, object]:
     """读取最新一轮数据，生成仪表盘摘要。"""
-    rows = add_first_alert_times(load_latest_snapshots())
+    rows = add_first_alert_context(load_latest_snapshots())
     x_preview = read_json_file(X_POST_PREVIEW_JSON_FILE, {})
     tweets = read_json_file(TWEETS_JSON_FILE, [])
     high_risk = [row for row in rows if (row.get("risk_score") or 0) >= 70]
@@ -57,7 +58,7 @@ def build_summary() -> dict[str, object]:
     return {
         "last_updated": last_updated,
         "coins": rows,
-        "top": sorted(rows, key=lambda row: row.get("risk_score") or 0, reverse=True)[:5],
+        "top": sorted(rows, key=lambda row: row.get("risk_score") or 0, reverse=True)[:TOP_N],
         "tweet_count": len(tweets),
         "publish_candidates": len(high_risk),
         "x_preview": {
@@ -79,18 +80,20 @@ def load_latest_snapshots() -> list[dict[str, object]]:
                oi_change_1h, oi_change_24h, long_liquidation, short_liquidation,
                risk_score, anomaly_tag, source
         FROM market_snapshots
-        WHERE id IN (
-            SELECT MAX(id)
+        WHERE timestamp_utc = (
+            SELECT MAX(timestamp_utc)
             FROM market_snapshots
-            GROUP BY symbol
         )
         ORDER BY risk_score DESC, symbol ASC
     """
-    return query_rows(sql)
+    rows = query_rows(sql)
+    for row in rows:
+        row["outcome_probability"] = estimate_outcome_probability(row)
+    return rows
 
 
-def add_first_alert_times(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    """为最新异常信号补充首次提示时间。正常信号不显示首次提示。"""
+def add_first_alert_context(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """为最新异常信号补充首次提示时间、价格和后续最大涨跌幅。"""
     if not rows or not SQLITE_DB_FILE.exists():
         return rows
 
@@ -100,18 +103,51 @@ def add_first_alert_times(rows: list[dict[str, object]]) -> list[dict[str, objec
             symbol = row.get("symbol")
             if not symbol or _is_normal_tag(tag):
                 row["first_alert_at"] = None
+                row["first_alert_price"] = None
+                row["max_gain_since_first_alert_pct"] = None
+                row["max_drawdown_since_first_alert_pct"] = None
                 continue
-            first_seen = conn.execute(
+            first_alert = conn.execute(
                 """
-                SELECT MIN(timestamp_utc)
+                SELECT timestamp_utc, price
                 FROM market_snapshots
                 WHERE symbol = ?
                   AND anomaly_tag = ?
                   AND anomaly_tag NOT IN ('正常', '姝ｅ父')
+                  AND price IS NOT NULL
+                ORDER BY timestamp_utc ASC
+                LIMIT 1
                 """,
                 (symbol, tag),
-            ).fetchone()[0]
+            ).fetchone()
+            if not first_alert:
+                row["first_alert_at"] = None
+                row["first_alert_price"] = None
+                row["max_gain_since_first_alert_pct"] = None
+                row["max_drawdown_since_first_alert_pct"] = None
+                continue
+
+            first_seen, first_price = first_alert
             row["first_alert_at"] = first_seen
+            row["first_alert_price"] = first_price
+            move = conn.execute(
+                """
+                SELECT MAX(price), MIN(price)
+                FROM market_snapshots
+                WHERE symbol = ?
+                  AND timestamp_utc >= ?
+                  AND timestamp_utc <= ?
+                  AND price IS NOT NULL
+                """,
+                (symbol, first_seen, row.get("timestamp_utc")),
+            ).fetchone()
+            max_price, min_price = move if move else (None, None)
+            if first_price and max_price is not None and min_price is not None:
+                row["max_gain_since_first_alert_pct"] = (max_price - first_price) / first_price * 100
+                row["max_drawdown_since_first_alert_pct"] = (min_price - first_price) / first_price * 100
+            else:
+                row["max_gain_since_first_alert_pct"] = None
+                row["max_drawdown_since_first_alert_pct"] = None
 
     return rows
 
@@ -127,12 +163,16 @@ def load_history(limit: int) -> list[dict[str, object]]:
     if not SQLITE_DB_FILE.exists():
         return []
     sql = """
-        SELECT timestamp_utc, coin, symbol, price, funding_rate, open_interest,
-               oi_change_1h, oi_change_24h, long_liquidation, short_liquidation,
-               risk_score, anomaly_tag, source
-        FROM market_snapshots
+        SELECT *
+        FROM (
+            SELECT timestamp_utc, coin, symbol, price, funding_rate, open_interest,
+                   oi_change_1h, oi_change_24h, long_liquidation, short_liquidation,
+                   risk_score, anomaly_tag, source
+            FROM market_snapshots
+            ORDER BY timestamp_utc DESC, symbol ASC
+            LIMIT ?
+        )
         ORDER BY timestamp_utc ASC, symbol ASC
-        LIMIT ?
     """
     return query_rows(sql, (limit,))
 

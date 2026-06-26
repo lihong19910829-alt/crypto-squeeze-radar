@@ -300,7 +300,7 @@ select {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 680px;
+  min-width: 860px;
 }
 
 th,
@@ -348,12 +348,39 @@ th {
   font-size: 12px;
 }
 
+.outcome-label {
+  display: block;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.move-up {
+  display: block;
+  font-weight: 700;
+  color: var(--green);
+  white-space: nowrap;
+}
+
+td small,
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .risk-bars,
 .heat-list,
 .tweet-list,
 .preview-list {
   display: grid;
   gap: 12px;
+}
+
+.risk-bars,
+.heat-list {
+  max-height: 720px;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .bar-row {

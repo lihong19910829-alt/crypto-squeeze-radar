@@ -56,7 +56,7 @@ X_POST_PREVIEW_MD_FILE = OUTPUT_DIR / "x_post_preview.md"
 HTTP_TIMEOUT_SECONDS = 12
 
 # Top N 异常币种数量。
-TOP_N = 5
+TOP_N = 10
 
 # X/Twitter 发布配置。默认只预览，不真实发布。
 POST_TO_X = os.getenv("POST_TO_X", "false").lower() == "true"

@@ -48,14 +48,24 @@ class BinanceFuturesClient:
         query = f"?{urlencode(params)}" if params else ""
         url = f"{self.BASE_URL}{path}{query}"
         request = Request(url, headers={"User-Agent": "crypto-squeeze-radar/0.1"})
-        try:
-            with urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="ignore")
-            raise RuntimeError(f"Binance HTTP {exc.code}: {body}") from exc
-        except URLError as exc:
-            raise RuntimeError(f"Binance 网络错误: {exc.reason}") from exc
+        last_error: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                with urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="ignore")
+                if exc.code not in {408, 425, 429, 500, 502, 503, 504} or attempt == 3:
+                    raise RuntimeError(f"Binance HTTP {exc.code}: {body}") from exc
+                last_error = exc
+            except (URLError, TimeoutError, ConnectionResetError, OSError) as exc:
+                last_error = exc
+                if attempt == 3:
+                    reason = getattr(exc, "reason", exc)
+                    raise RuntimeError(f"Binance 网络错误: {reason}") from exc
+            time.sleep(1.5 * attempt)
+
+        raise RuntimeError(f"Binance 网络错误: {last_error}")
 
     def get_mark_price_and_funding(self, symbol: str) -> tuple[float | None, float | None]:
         """获取标记价格和最近一期 Funding Rate。"""

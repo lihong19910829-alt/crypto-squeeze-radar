@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import csv
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
 
 from config import (
     BINANCE_MAX_WORKERS,
+    BINANCE_QUOTE_ASSET,
     BINANCE_SYMBOLS,
     HISTORY_FILE,
     MONITOR_ALL_BINANCE_SYMBOLS,
@@ -31,7 +33,7 @@ def main() -> None:
     hyperliquid = HyperliquidClient()
     evaluated: list[dict[str, Any]] = []
     universe = get_monitoring_universe(binance)
-    premium_map = binance.get_all_mark_prices_and_funding() if MONITOR_ALL_BINANCE_SYMBOLS else {}
+    premium_map = get_premium_map(binance) if MONITOR_ALL_BINANCE_SYMBOLS else {}
 
     print(f"本轮监控交易对数量：{len(universe)}")
     print(f"Binance 并发抓取线程数：{BINANCE_MAX_WORKERS}")
@@ -63,8 +65,64 @@ def main() -> None:
 def get_monitoring_universe(binance: BinanceFuturesClient) -> list[dict[str, str]]:
     """生成本轮监控交易对列表。"""
     if MONITOR_ALL_BINANCE_SYMBOLS:
-        return binance.get_trading_symbols()
+        try:
+            return binance.get_trading_symbols()
+        except Exception as error:
+            fallback = load_previous_universe()
+            if fallback:
+                print(f"Binance 交易对列表暂不可用，复用上一轮 {len(fallback)} 个交易对: {error}")
+                return fallback
+            print(f"Binance 交易对列表暂不可用，退回核心观察列表: {error}")
     return [{"coin": coin, "symbol": BINANCE_SYMBOLS[coin]} for coin in WATCHLIST]
+
+
+def get_premium_map(binance: BinanceFuturesClient) -> dict[str, Any]:
+    """批量读取标记价格/Funding；失败时退回单币接口。"""
+    try:
+        return binance.get_all_mark_prices_and_funding()
+    except Exception as error:
+        print(f"Binance 批量价格/Funding 暂不可用，改为逐币抓取: {error}")
+        return {}
+
+
+def load_previous_universe() -> list[dict[str, str]]:
+    """从 SQLite 最近一轮快照恢复交易对列表，避免发现接口抖动导致整轮停更。"""
+    if not SQLITE_DB_FILE.exists():
+        return []
+
+    sql = """
+        SELECT coin, symbol
+        FROM market_snapshots
+        WHERE timestamp_utc = (
+            SELECT MAX(timestamp_utc)
+            FROM market_snapshots
+        )
+          AND symbol IS NOT NULL
+          AND symbol != ''
+        ORDER BY symbol ASC
+    """
+    try:
+        with sqlite3.connect(SQLITE_DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(sql).fetchall()
+    except sqlite3.Error as error:
+        print(f"读取上一轮交易对列表失败: {error}")
+        return []
+
+    return [
+        {
+            "coin": row["coin"] or coin_from_symbol(row["symbol"]),
+            "symbol": row["symbol"],
+        }
+        for row in rows
+    ]
+
+
+def coin_from_symbol(symbol: str) -> str:
+    """从交易对名称里提取币种。"""
+    if symbol.endswith(BINANCE_QUOTE_ASSET):
+        return symbol[: -len(BINANCE_QUOTE_ASSET)]
+    return symbol
 
 
 def process_symbol(

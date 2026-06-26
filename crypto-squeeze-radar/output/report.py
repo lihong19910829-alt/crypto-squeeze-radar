@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from config import REPORT_MD_FILE
+from indicators.outcome_probability import format_outcome_probability
 
 
 def save_report(items: list[dict[str, Any]]) -> None:
@@ -17,17 +18,18 @@ def save_report(items: list[dict[str, Any]]) -> None:
         f"- 生成时间 UTC：{datetime.now(timezone.utc).isoformat()}",
         "- 说明：本报告只用于市场结构监控，不构成投资建议。",
         "",
-        "| 排名 | 币种 | 评分 | 等级 | 标签 | 价格 | Funding | OI 1h | OI 24h | 多头清算 | 空头清算 | 数据源 |",
-        "| --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| 排名 | 币种 | 评分 | 等级 | 标签 | 后验概率 | 价格 | Funding | OI 1h | OI 24h | 多头清算 | 空头清算 | 数据源 |",
+        "| --- | --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for index, item in enumerate(items, start=1):
         lines.append(
-            "| {rank} | {coin} | {score} | {level} | {tags} | {price} | {funding} | {oi1h} | {oi24h} | {long_liq} | {short_liq} | {source} |".format(
+            "| {rank} | {coin} | {score} | {level} | {tags} | {outcome} | {price} | {funding} | {oi1h} | {oi24h} | {long_liq} | {short_liq} | {source} |".format(
                 rank=index,
                 coin=item["coin"],
                 score=item["risk_score"],
                 level=item["risk_level"],
                 tags="、".join(item["tags"]),
+                outcome=format_outcome_probability(item),
                 price=_fmt_num(item.get("price")),
                 funding=_fmt_pct((item.get("funding_rate") or 0) * 100 if item.get("funding_rate") is not None else None),
                 oi1h=_fmt_pct(item.get("oi_change_1h_pct")),
@@ -65,4 +67,3 @@ def _fmt_pct(value: float | None) -> str:
     if value is None:
         return "N/A"
     return f"{value:.2f}%"
-

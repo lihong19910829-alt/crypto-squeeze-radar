@@ -10,6 +10,7 @@ from data_sources.exchange import MarketSnapshot
 from indicators.funding import funding_bias
 from indicators.liquidation import liquidation_tag
 from indicators.oi import oi_tags
+from indicators.outcome_probability import estimate_outcome_probability
 
 
 def evaluate_snapshot(snapshot: MarketSnapshot) -> dict[str, Any]:
@@ -62,6 +63,7 @@ def evaluate_snapshot(snapshot: MarketSnapshot) -> dict[str, Any]:
     data["tags"] = tags
     data["risk_score"] = score
     data["risk_level"] = risk_level(score)
+    data["outcome_probability"] = estimate_outcome_probability(data)
     return data
 
 
@@ -74,4 +76,3 @@ def risk_level(score: int) -> str:
     if score <= 80:
         return "危险"
     return "极端"
-

@@ -30,7 +30,7 @@ async function loadDashboard(options = {}) {
     try {
       [summary, history, tweets, xPreview] = await Promise.all([
         fetchJson("/api/summary"),
-        fetchJson("/api/history?limit=320"),
+        fetchJson("/api/history?limit=5000"),
         fetchJson("/api/tweets"),
         fetchJson("/api/x-preview"),
       ]);
@@ -126,6 +126,9 @@ function renderSignals() {
           <td>${formatPercent(item.oi_change_1h)}</td>
           <td>${formatPercent(item.oi_change_24h)}</td>
           <td>${formatFirstAlert(item.first_alert_at)}</td>
+          <td>${formatNumber(item.first_alert_price, 4)}</td>
+          <td>${renderAlertMove(item)}</td>
+          <td>${renderOutcome(item.outcome_probability)}</td>
         </tr>
       `;
     })
@@ -133,7 +136,7 @@ function renderSignals() {
 }
 
 function renderRiskBars() {
-  const rows = (state.summary?.coins || []).slice(0, 20);
+  const rows = state.summary?.coins || [];
   $("#riskBars").innerHTML =
     rows
       .map((item) => {
@@ -150,7 +153,12 @@ function renderRiskBars() {
 }
 
 function renderSymbolOptions() {
-  const symbols = [...new Set(state.history.map((item) => item.symbol))].filter(Boolean);
+  const symbols = [
+    ...new Set([
+      ...(state.summary?.coins || []).map((item) => item.symbol),
+      ...state.history.map((item) => item.symbol),
+    ]),
+  ].filter(Boolean);
   if (!symbols.includes(state.selectedSymbol)) state.selectedSymbol = symbols[0] || "";
   $("#symbolSelect").innerHTML = symbols
     .map((symbol) => `<option value="${escapeHtml(symbol)}" ${symbol === state.selectedSymbol ? "selected" : ""}>${escapeHtml(symbol)}</option>`)
@@ -198,7 +206,7 @@ function renderChart() {
 }
 
 function renderHeatCards() {
-  const rows = (state.summary?.coins || []).slice(0, 12);
+  const rows = state.summary?.coins || [];
   $("#heatCards").innerHTML =
     rows
       .map(
@@ -263,6 +271,26 @@ function renderTags(value) {
     .join("");
 }
 
+function renderOutcome(outcome) {
+  if (!outcome) return `<span class="muted">待积累</span>`;
+  return `
+    <span class="outcome-label">${escapeHtml(outcome.direction || "中性观察")}</span>
+    <small>${escapeHtml(outcome.horizon || "1-6h")} · 涨 ${outcome.up_probability ?? "--"}% / 跌 ${outcome.down_probability ?? "--"}%</small>
+  `;
+}
+
+function renderAlertMove(item) {
+  const gain = item.max_gain_since_first_alert_pct;
+  const drawdown = item.max_drawdown_since_first_alert_pct;
+  if (gain === null || gain === undefined || drawdown === null || drawdown === undefined) {
+    return `<span class="muted">--</span>`;
+  }
+  return `
+    <span class="move-up">最高 ${formatSignedPercent(gain)}</span>
+    <small>最低 ${formatSignedPercent(drawdown)}</small>
+  `;
+}
+
 function scoreTone(score) {
   if (score >= 81) return "extreme";
   if (score >= 61) return "danger";
@@ -291,6 +319,12 @@ function formatNumber(value, digits = 2) {
 function formatPercent(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "N/A";
   return `${Number(value).toFixed(2)}%`;
+}
+
+function formatSignedPercent(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "N/A";
+  const number = Number(value);
+  return `${number >= 0 ? "+" : ""}${number.toFixed(2)}%`;
 }
 
 function formatUsd(value) {
