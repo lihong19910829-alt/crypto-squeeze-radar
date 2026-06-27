@@ -493,6 +493,22 @@ td small,
   stroke-width: 3;
 }
 
+.prob-label {
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.prob-label-bg {
+  fill: rgba(255, 255, 255, 0.92);
+  stroke: #d7e1ef;
+  stroke-width: 1;
+}
+
+.prob-label text {
+  fill: #42516a;
+  font-weight: 700;
+}
+
 .heat-card,
 .tweet-card,
 .preview-card {

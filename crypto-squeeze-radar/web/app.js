@@ -251,8 +251,18 @@ function renderChart() {
       `;
     })
     .join("");
+  const probabilityLabels = points.map((point) => renderProbabilityLabel(point, pad, width)).join("");
   const dots = points
-    .map((point) => `<circle class="dot" cx="${point.x}" cy="${point.y}" r="4"><title>${formatTime(point.item.timestamp_utc)}: ${point.item.risk_score}</title></circle>`)
+    .map((point) => {
+      const title = [
+        formatTime(point.item.timestamp_utc),
+        `风险评分 ${point.item.risk_score}`,
+        probabilityTitle(point.item.outcome_probability),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `<circle class="dot" cx="${point.x}" cy="${point.y}" r="4"><title>${escapeHtml(title)}</title></circle>`;
+    })
     .join("");
 
   svg.innerHTML = `
@@ -261,9 +271,38 @@ function renderChart() {
     <line class="axis" x1="${pad.left}" x2="${width - pad.right}" y1="${height - pad.bottom}" y2="${height - pad.bottom}"></line>
     <line class="axis" x1="${pad.left}" x2="${pad.left}" y1="${pad.top}" y2="${height - pad.bottom}"></line>
     <path class="line" d="${path}"></path>
+    ${probabilityLabels}
     ${dots}
     <text x="${pad.left}" y="${height - 10}" fill="#687386" font-size="12">${escapeHtml(state.selectedSymbol)} · ${rows.length}/${allRows.length} 条</text>
   `;
+}
+
+function renderProbabilityLabel(point, pad, width) {
+  const label = probabilityLabel(point.item.outcome_probability);
+  if (!label) return "";
+  const labelWidth = 82;
+  const labelHeight = 18;
+  const x = Math.min(Math.max(point.x, pad.left + labelWidth / 2), width - pad.right - labelWidth / 2);
+  const above = point.y > pad.top + 28;
+  const y = above ? point.y - 26 : point.y + 10;
+  return `
+    <g class="prob-label">
+      <rect class="prob-label-bg" x="${x - labelWidth / 2}" y="${y}" width="${labelWidth}" height="${labelHeight}" rx="6"></rect>
+      <text x="${x}" y="${y + 13}" text-anchor="middle">${escapeHtml(label)}</text>
+    </g>
+  `;
+}
+
+function probabilityLabel(outcome) {
+  if (!outcome) return "";
+  const up = outcome.up_probability ?? "--";
+  const down = outcome.down_probability ?? "--";
+  return `涨${up}%/跌${down}%`;
+}
+
+function probabilityTitle(outcome) {
+  if (!outcome) return "";
+  return `后验概率 ${outcome.horizon || "1-6h"}：涨${outcome.up_probability ?? "--"}% / 跌${outcome.down_probability ?? "--"}%`;
 }
 
 function filterRowsByRange(rows) {

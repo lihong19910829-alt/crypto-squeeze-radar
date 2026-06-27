@@ -174,7 +174,10 @@ def load_history(limit: int) -> list[dict[str, object]]:
         )
         ORDER BY timestamp_utc ASC, symbol ASC
     """
-    return query_rows(sql, (limit,))
+    rows = query_rows(sql, (limit,))
+    for row in rows:
+        row["outcome_probability"] = estimate_outcome_probability(row)
+    return rows
 
 
 def query_rows(sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
