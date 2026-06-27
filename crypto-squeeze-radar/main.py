@@ -32,8 +32,8 @@ def main() -> None:
     binance = BinanceFuturesClient()
     hyperliquid = HyperliquidClient()
     evaluated: list[dict[str, Any]] = []
-    universe = get_monitoring_universe(binance)
     premium_map = get_premium_map(binance) if MONITOR_ALL_BINANCE_SYMBOLS else {}
+    universe = get_monitoring_universe(binance, bool(premium_map))
 
     print(f"本轮监控交易对数量：{len(universe)}")
     print(f"Binance 并发抓取线程数：{BINANCE_MAX_WORKERS}")
@@ -62,9 +62,12 @@ def main() -> None:
     print("已输出：output/report.md、output/tweets.json、output/tweets.md、output/x_post_preview.md")
 
 
-def get_monitoring_universe(binance: BinanceFuturesClient) -> list[dict[str, str]]:
+def get_monitoring_universe(binance: BinanceFuturesClient, bulk_market_ok: bool = True) -> list[dict[str, str]]:
     """生成本轮监控交易对列表。"""
     if MONITOR_ALL_BINANCE_SYMBOLS:
+        if not bulk_market_ok:
+            print("Binance 批量行情不可用，本轮降级为核心观察列表，避免全市场逐币超时导致停更")
+            return [{"coin": coin, "symbol": BINANCE_SYMBOLS[coin]} for coin in WATCHLIST]
         try:
             return binance.get_trading_symbols()
         except Exception as error:
