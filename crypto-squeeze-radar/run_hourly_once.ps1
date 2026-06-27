@@ -15,7 +15,7 @@ if (-not $env:BINANCE_MAX_WORKERS) {
   $env:BINANCE_MAX_WORKERS = "12"
 }
 if (-not $env:MAX_BINANCE_SYMBOLS) {
-  $env:MAX_BINANCE_SYMBOLS = "120"
+  $env:MAX_BINANCE_SYMBOLS = "0"
 }
 
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"

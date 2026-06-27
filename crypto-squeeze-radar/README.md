@@ -227,6 +227,7 @@ ENABLE_BINANCE_FORCE_ORDERS=false
 
 - `MONITOR_ALL_BINANCE_SYMBOLS=true`：自动监控 Binance 全部 USDT 永续合约，当前为默认值
 - `MAX_BINANCE_SYMBOLS=0`：不限制数量；调试时可以设为 `20`
+- 每小时任务脚本默认同样使用 `MAX_BINANCE_SYMBOLS=0`，不会再只抓取前 120 个交易对
 - `ENABLE_BINANCE_FORCE_ORDERS=false`：默认不请求 Binance 强平 REST 接口，因为该接口经常维护或不可用；后续建议用 Coinglass 增强清算数据
 
 如果只想监控手工列表，可以设置：

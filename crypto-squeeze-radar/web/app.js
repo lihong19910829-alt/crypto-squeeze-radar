@@ -4,18 +4,37 @@ const state = {
   tweets: [],
   xPreview: null,
   selectedSymbol: null,
+  chartRange: "24",
 };
 
 const $ = (selector) => document.querySelector(selector);
 
 document.addEventListener("DOMContentLoaded", () => {
-  $("#refreshBtn").addEventListener("click", () => loadDashboard({ forceRefresh: true }));
+  $("#refreshBtn").addEventListener("click", handleRefresh);
   $("#symbolSelect").addEventListener("change", (event) => {
-    state.selectedSymbol = event.target.value;
-    renderChart();
+    selectSymbol(event.target.value);
+  });
+  $("#riskBars").addEventListener("click", (event) => {
+    const row = event.target.closest("[data-symbol]");
+    if (row) selectSymbol(row.dataset.symbol, { scrollToChart: true });
+  });
+  document.querySelectorAll("[data-range]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.chartRange = button.dataset.range;
+      renderRangeTabs();
+      renderChart();
+    });
   });
   loadDashboard();
 });
+
+function handleRefresh() {
+  if (window.location.protocol === "file:") {
+    window.location.reload();
+    return;
+  }
+  loadDashboard({ forceRefresh: true });
+}
 
 async function loadDashboard(options = {}) {
   const embedded = options.forceRefresh ? await loadStaticData() : window.RADAR_DATA;
@@ -84,6 +103,7 @@ function renderAll() {
   renderSignals();
   renderRiskBars();
   renderSymbolOptions();
+  renderRangeTabs();
   renderChart();
   renderHeatCards();
   renderTweets();
@@ -98,9 +118,14 @@ function renderSummary() {
   $("#maxRisk").textContent = summary.max_risk ?? "--";
   $("#publishCandidates").textContent = summary.publish_candidates ?? "--";
   $("#tweetCount").textContent = summary.tweet_count ?? "--";
-  $("#xMode").textContent = summary.x_preview?.post_to_x ? "Live" : "Dry run";
+  $("#xMode").textContent = summary.x_preview?.post_to_x ? "Live" : "只读";
   $("#xThreshold").textContent = `阈值 ${summary.x_preview?.min_risk_score ?? 70}`;
-  $("#postState").textContent = summary.x_preview?.post_to_x ? "Live posting" : "Dry run";
+  const isLocalFile = window.location.protocol === "file:";
+  $("#refreshBtn").textContent = isLocalFile ? "重载本地数据" : "刷新数据";
+  $("#postState").textContent = isLocalFile ? "本地静态数据" : summary.x_preview?.post_to_x ? "X 发布开启" : "只读监控";
+  $("#postState").title = isLocalFile
+    ? "当前直接打开本地页面；点击按钮会重新读取磁盘上的 data.js。"
+    : "当前通过本地服务读取数据。";
 
   const coinCount = summary.coins?.length ?? 0;
   $("#radarCoinCount").textContent = coinCount || "--";
@@ -141,12 +166,14 @@ function renderRiskBars() {
     rows
       .map((item) => {
         const score = item.risk_score || 0;
+        const symbol = item.symbol || "";
+        const active = symbol === state.selectedSymbol ? " active" : "";
         return `
-          <div class="bar-row">
+          <button class="bar-row${active}" type="button" data-symbol="${escapeHtml(symbol)}" aria-pressed="${active ? "true" : "false"}">
             <strong>${escapeHtml(item.coin || coinFromSymbol(item.symbol))}</strong>
             <div class="bar-track"><div class="bar-fill ${scoreTone(score)}" style="width:${score}%"></div></div>
             <span>${score}</span>
-          </div>
+          </button>
         `;
       })
       .join("") || `<div class="empty">暂无风险评分数据</div>`;
@@ -165,17 +192,38 @@ function renderSymbolOptions() {
     .join("");
 }
 
+function selectSymbol(symbol, options = {}) {
+  if (!symbol || symbol === state.selectedSymbol) return;
+  state.selectedSymbol = symbol;
+  const select = $("#symbolSelect");
+  if (select) select.value = symbol;
+  renderRiskBars();
+  renderChart();
+  if (options.scrollToChart) $("#history")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderRangeTabs() {
+  document.querySelectorAll("[data-range]").forEach((button) => {
+    const active = button.dataset.range === state.chartRange;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
 function renderChart() {
   const svg = $("#riskChart");
-  const rows = state.history.filter((item) => item.symbol === state.selectedSymbol);
+  const allRows = state.history
+    .filter((item) => item.symbol === state.selectedSymbol)
+    .sort((a, b) => new Date(a.timestamp_utc) - new Date(b.timestamp_utc));
+  const rows = filterRowsByRange(allRows);
   if (!rows.length) {
-    svg.innerHTML = `<text x="380" y="140" text-anchor="middle" fill="#687386">暂无历史趋势数据</text>`;
+    svg.innerHTML = `<text x="380" y="160" text-anchor="middle" fill="#687386">暂无历史趋势数据</text>`;
     return;
   }
 
   const width = 760;
-  const height = 280;
-  const pad = { left: 44, right: 18, top: 18, bottom: 34 };
+  const height = 320;
+  const pad = { left: 44, right: 18, top: 18, bottom: 58 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
   const maxY = Math.max(100, ...rows.map((item) => item.risk_score || 0));
@@ -191,18 +239,54 @@ function renderChart() {
       return `<line class="grid-line" x1="${pad.left}" x2="${width - pad.right}" y1="${y}" y2="${y}"></line><text x="12" y="${y + 4}" fill="#687386" font-size="12">${tick}</text>`;
     })
     .join("");
+  const tickPoints = getTimeTicks(points);
+  const xTicks = tickPoints
+    .map((point, index) => {
+      const y1 = pad.top;
+      const y2 = height - pad.bottom;
+      const anchor = index === 0 ? "start" : index === tickPoints.length - 1 ? "end" : "middle";
+      return `
+        <line class="grid-line vertical" x1="${point.x}" x2="${point.x}" y1="${y1}" y2="${y2}"></line>
+        <text class="x-tick" x="${point.x}" y="${height - 32}" text-anchor="${anchor}">${formatAxisTime(point.item.timestamp_utc)}</text>
+      `;
+    })
+    .join("");
   const dots = points
     .map((point) => `<circle class="dot" cx="${point.x}" cy="${point.y}" r="4"><title>${formatTime(point.item.timestamp_utc)}: ${point.item.risk_score}</title></circle>`)
     .join("");
 
   svg.innerHTML = `
     ${grid}
+    ${xTicks}
     <line class="axis" x1="${pad.left}" x2="${width - pad.right}" y1="${height - pad.bottom}" y2="${height - pad.bottom}"></line>
     <line class="axis" x1="${pad.left}" x2="${pad.left}" y1="${pad.top}" y2="${height - pad.bottom}"></line>
     <path class="line" d="${path}"></path>
     ${dots}
-    <text x="${pad.left}" y="${height - 8}" fill="#687386" font-size="12">${escapeHtml(state.selectedSymbol)}</text>
+    <text x="${pad.left}" y="${height - 10}" fill="#687386" font-size="12">${escapeHtml(state.selectedSymbol)} · ${rows.length}/${allRows.length} 条</text>
   `;
+}
+
+function filterRowsByRange(rows) {
+  if (!rows.length || state.chartRange === "all") return rows;
+  const hours = Number(state.chartRange);
+  const latest = getLatestTimestamp(rows);
+  if (!latest || !Number.isFinite(hours)) return rows;
+  const cutoff = latest - hours * 60 * 60 * 1000;
+  const scoped = rows.filter((item) => new Date(item.timestamp_utc).getTime() >= cutoff);
+  return scoped.length >= 2 ? scoped : rows.slice(-Math.min(rows.length, 12));
+}
+
+function getLatestTimestamp(rows) {
+  return rows.reduce((latest, item) => {
+    const value = new Date(item.timestamp_utc).getTime();
+    return Number.isFinite(value) ? Math.max(latest, value) : latest;
+  }, 0);
+}
+
+function getTimeTicks(points) {
+  if (points.length <= 4) return points;
+  const indexes = [0, Math.round((points.length - 1) / 3), Math.round(((points.length - 1) * 2) / 3), points.length - 1];
+  return [...new Set(indexes)].map((index) => points[index]);
 }
 
 function renderHeatCards() {
@@ -304,6 +388,17 @@ function coinFromSymbol(symbol = "") {
 function formatTime(value) {
   if (!value) return "--";
   return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatAxisTime(value) {
+  if (!value) return "--";
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function formatFirstAlert(value) {

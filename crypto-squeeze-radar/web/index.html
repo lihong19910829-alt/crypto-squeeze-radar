@@ -35,8 +35,8 @@
             <p id="lastUpdated">正在读取最新监控数据</p>
           </div>
           <div class="top-actions">
-            <button id="refreshBtn" type="button">刷新</button>
-            <div id="postState" class="status-pill">Dry run</div>
+            <button id="refreshBtn" type="button">重载本地数据</button>
+            <div id="postState" class="status-pill">本地静态数据</div>
           </div>
         </header>
 
@@ -125,9 +125,16 @@
                 <h2>风险评分趋势</h2>
                 <p>最近历史记录，用于观察异常是否持续。</p>
               </div>
-              <select id="symbolSelect" aria-label="选择交易对"></select>
+              <div class="chart-tools">
+                <div class="range-tabs" role="group" aria-label="选择趋势图时间范围">
+                  <button class="range-tab active" type="button" data-range="24">24h</button>
+                  <button class="range-tab" type="button" data-range="72">72h</button>
+                  <button class="range-tab" type="button" data-range="all">全部</button>
+                </div>
+                <select id="symbolSelect" aria-label="选择交易对"></select>
+              </div>
             </div>
-            <svg id="riskChart" class="chart" viewBox="0 0 760 280" role="img" aria-label="风险评分趋势图"></svg>
+            <svg id="riskChart" class="chart" viewBox="0 0 760 320" preserveAspectRatio="xMidYMin meet" role="img" aria-label="风险评分趋势图"></svg>
           </article>
 
           <article class="panel">

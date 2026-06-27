@@ -389,6 +389,21 @@ td small,
   gap: 10px;
   align-items: center;
   font-size: 13px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.bar-row:hover,
+.bar-row.active {
+  background: #f2f7ff;
+  border-color: #c9daf8;
+}
+
+.bar-row.active strong {
+  color: var(--blue);
 }
 
 .bar-track {
@@ -413,8 +428,38 @@ td small,
 }
 
 .chart {
+  display: block;
   width: 100%;
-  min-height: 280px;
+  min-height: 320px;
+}
+
+.chart-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.range-tabs {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.range-tab {
+  min-width: 46px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.range-tab.active {
+  background: #fff;
+  color: var(--blue);
+  box-shadow: 0 1px 4px rgba(32, 44, 68, 0.12);
 }
 
 .axis {
@@ -425,6 +470,15 @@ td small,
 .grid-line {
   stroke: #edf1f6;
   stroke-width: 1;
+}
+
+.grid-line.vertical {
+  stroke-dasharray: 3 5;
+}
+
+.x-tick {
+  fill: #687386;
+  font-size: 11px;
 }
 
 .line {
