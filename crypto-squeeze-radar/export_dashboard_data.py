@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from web_server import build_summary, load_history, read_json_file
-from config import BASE_DIR, TWEETS_JSON_FILE, X_POST_PREVIEW_JSON_FILE
+from config import BASE_DIR, PATTERN_SIGNALS_JSON_FILE, TWEETS_JSON_FILE, X_POST_PREVIEW_JSON_FILE
 
 
 def main() -> None:
@@ -13,6 +13,7 @@ def main() -> None:
     payload = {
         "summary": build_summary(),
         "history": load_history(5000),
+        "patterns": read_json_file(PATTERN_SIGNALS_JSON_FILE, {}),
         "tweets": read_json_file(TWEETS_JSON_FILE, []),
         "xPreview": read_json_file(X_POST_PREVIEW_JSON_FILE, {}),
     }

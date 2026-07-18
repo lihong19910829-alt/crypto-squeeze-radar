@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 
+TRADE_PROBABILITY_THRESHOLD = 83
+
+
 def estimate_outcome_probability(item: dict[str, Any]) -> dict[str, Any]:
     """Estimate directional odds for the signal using simple backtest buckets.
 
@@ -100,10 +103,13 @@ def estimate_outcome_probability(item: dict[str, Any]) -> dict[str, Any]:
 def format_outcome_probability(item: dict[str, Any]) -> str:
     """Return a short Chinese label for reports and alert text."""
     outcome = item.get("outcome_probability") or estimate_outcome_probability(item)
-    return (
+    text = (
         f"后验概率（{outcome['horizon']}）：上涨约{outcome['up_probability']}%，"
         f"下跌约{outcome['down_probability']}%；{outcome['direction']}。"
     )
+    if outcome.get("trade_action") in {"做多", "做空"}:
+        text += f" {outcome['trade_label']}。"
+    return text
 
 
 def _result(
@@ -114,12 +120,34 @@ def _result(
     down_probability: int,
     basis: str,
 ) -> dict[str, Any]:
+    trade_hint = _trade_hint(up_probability, down_probability)
     return {
         "direction": direction,
         "horizon": horizon,
         "up_probability": up_probability,
         "down_probability": down_probability,
         "basis": basis,
+        **trade_hint,
+    }
+
+
+def _trade_hint(up_probability: int, down_probability: int) -> dict[str, Any]:
+    if up_probability > TRADE_PROBABILITY_THRESHOLD and up_probability > down_probability:
+        return {
+            "trade_action": "做多",
+            "trade_confidence": up_probability,
+            "trade_label": f"后验概率>{TRADE_PROBABILITY_THRESHOLD}%，可关注做多",
+        }
+    if down_probability > TRADE_PROBABILITY_THRESHOLD and down_probability > up_probability:
+        return {
+            "trade_action": "做空",
+            "trade_confidence": down_probability,
+            "trade_label": f"后验概率>{TRADE_PROBABILITY_THRESHOLD}%，可关注做空",
+        }
+    return {
+        "trade_action": "观望",
+        "trade_confidence": max(up_probability, down_probability),
+        "trade_label": f"后验概率未超过{TRADE_PROBABILITY_THRESHOLD}%，观望",
     }
 
 

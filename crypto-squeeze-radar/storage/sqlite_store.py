@@ -26,6 +26,16 @@ def init_db(db_file: Path = SQLITE_DB_FILE) -> None:
                 open_interest REAL,
                 oi_change_1h REAL,
                 oi_change_24h REAL,
+                price_change_1h REAL,
+                price_change_4h REAL,
+                price_change_24h REAL,
+                price_position_24h REAL,
+                high_24h REAL,
+                low_24h REAL,
+                quote_volume_24h REAL,
+                quote_volume_change_24h REAL,
+                funding_same_sign_count INTEGER,
+                funding_avg_abs_6 REAL,
                 long_liquidation REAL,
                 short_liquidation REAL,
                 risk_score INTEGER,
@@ -34,6 +44,22 @@ def init_db(db_file: Path = SQLITE_DB_FILE) -> None:
                 created_at_utc TEXT NOT NULL
             )
             """
+        )
+        _ensure_columns(
+            conn,
+            "market_snapshots",
+            {
+                "price_change_1h": "REAL",
+                "price_change_4h": "REAL",
+                "price_change_24h": "REAL",
+                "price_position_24h": "REAL",
+                "high_24h": "REAL",
+                "low_24h": "REAL",
+                "quote_volume_24h": "REAL",
+                "quote_volume_change_24h": "REAL",
+                "funding_same_sign_count": "INTEGER",
+                "funding_avg_abs_6": "REAL",
+            },
         )
         conn.execute(
             """
@@ -69,6 +95,16 @@ def save_market_snapshots(items: list[dict[str, Any]], db_file: Path = SQLITE_DB
                 item.get("open_interest"),
                 item.get("oi_change_1h_pct"),
                 item.get("oi_change_24h_pct"),
+                item.get("price_change_1h_pct"),
+                item.get("price_change_4h_pct"),
+                item.get("price_change_24h_pct"),
+                item.get("price_position_24h_pct"),
+                item.get("high_24h"),
+                item.get("low_24h"),
+                item.get("quote_volume_24h"),
+                item.get("quote_volume_change_24h_pct"),
+                item.get("funding_same_sign_count"),
+                item.get("funding_avg_abs_6"),
                 item.get("long_liquidation_usd"),
                 item.get("short_liquidation_usd"),
                 item.get("risk_score"),
@@ -90,6 +126,16 @@ def save_market_snapshots(items: list[dict[str, Any]], db_file: Path = SQLITE_DB
                 open_interest,
                 oi_change_1h,
                 oi_change_24h,
+                price_change_1h,
+                price_change_4h,
+                price_change_24h,
+                price_position_24h,
+                high_24h,
+                low_24h,
+                quote_volume_24h,
+                quote_volume_change_24h,
+                funding_same_sign_count,
+                funding_avg_abs_6,
                 long_liquidation,
                 short_liquidation,
                 risk_score,
@@ -97,8 +143,15 @@ def save_market_snapshots(items: list[dict[str, Any]], db_file: Path = SQLITE_DB
                 source,
                 created_at_utc
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
 
+
+def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    """为已有 SQLite 表补列，避免历史库需要手工迁移。"""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for name, column_type in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")

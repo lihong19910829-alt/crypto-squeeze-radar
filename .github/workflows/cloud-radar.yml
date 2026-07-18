@@ -5,8 +5,8 @@ on:
     branches:
       - main
   schedule:
-    # GitHub Actions 使用 UTC；每小时第 7 分钟运行，避开整点拥堵。
-    - cron: "7 * * * *"
+    # Hourly refresh paused on 2026-07-13; keep manual dispatch available.
+    # - cron: "1 * * * *"
     # 每月写入一次保活记录，防止公开仓库因 60 天无活动而停用定时任务。
     - cron: "17 3 1 * *"
   workflow_dispatch:

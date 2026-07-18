@@ -1,10 +1,12 @@
 const state = {
   summary: null,
   history: [],
+  patterns: {},
   tweets: [],
   xPreview: null,
   selectedSymbol: null,
   chartRange: "24",
+  opportunityFilter: "all",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -25,6 +27,13 @@ document.addEventListener("DOMContentLoaded", () => {
       renderChart();
     });
   });
+  document.querySelectorAll("[data-opportunity-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.opportunityFilter = button.dataset.opportunityFilter;
+      renderOpportunityFilterTabs();
+      renderOpportunityScanner();
+    });
+  });
   loadDashboard();
 });
 
@@ -40,16 +49,18 @@ async function loadDashboard(options = {}) {
   const embedded = options.forceRefresh ? await loadStaticData() : window.RADAR_DATA;
   let summary;
   let history;
+  let patterns;
   let tweets;
   let xPreview;
 
   if (embedded) {
-    ({ summary, history, tweets, xPreview } = embedded);
+    ({ summary, history, patterns, tweets, xPreview } = embedded);
   } else {
     try {
-      [summary, history, tweets, xPreview] = await Promise.all([
+      [summary, history, patterns, tweets, xPreview] = await Promise.all([
         fetchJson("/api/summary"),
         fetchJson("/api/history?limit=5000"),
+        fetchJson("/api/patterns"),
         fetchJson("/api/tweets"),
         fetchJson("/api/x-preview"),
       ]);
@@ -61,6 +72,7 @@ async function loadDashboard(options = {}) {
 
   state.summary = summary;
   state.history = history;
+  state.patterns = hasPatternPayload(patterns) ? patterns : summary.patterns || {};
   state.tweets = tweets;
   state.xPreview = xPreview;
   state.selectedSymbol = state.selectedSymbol || summary.top?.[0]?.symbol || history[0]?.symbol || "";
@@ -100,7 +112,10 @@ function showLoadError(error) {
 
 function renderAll() {
   renderSummary();
+  renderOpportunityFilterTabs();
+  renderOpportunityScanner();
   renderSignals();
+  renderPatterns();
   renderRiskBars();
   renderSymbolOptions();
   renderRangeTabs();
@@ -108,6 +123,275 @@ function renderAll() {
   renderHeatCards();
   renderTweets();
   renderXPreview();
+}
+
+function renderOpportunityFilterTabs() {
+  document.querySelectorAll("[data-opportunity-filter]").forEach((button) => {
+    const active = button.dataset.opportunityFilter === state.opportunityFilter;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function renderOpportunityScanner() {
+  const rows = (state.summary?.top || state.summary?.coins || [])
+    .slice(0, 20)
+    .map((item, index) => buildOpportunityRow(item, index + 1));
+  const filteredRows =
+    state.opportunityFilter === "all"
+      ? rows
+      : rows.filter((item) => item.direction === state.opportunityFilter);
+
+  $("#opportunityBtcRegime").textContent = state.summary?.btc_regime || "待接入";
+  $("#opportunityBtcSummary").textContent =
+    state.summary?.btc_summary ||
+    "当前后端还没有输出 BTC 4H / 1H 大环境字段；栏目先按现有异常数据展示候选，后续接入完整短线扫描器。";
+
+  $("#opportunityRows").innerHTML =
+    filteredRows
+      .map(
+        (item) => `
+          <tr>
+            <td>${item.rank}</td>
+            <td><strong>${escapeHtml(item.coin)}</strong><br><small>${escapeHtml(item.symbol)}</small></td>
+            <td>${renderDirection(item.direction)}</td>
+            <td><span class="score ${scoreTone(item.score)}">${item.score}</span></td>
+            <td>${formatNumber(item.currentPrice, 6)}</td>
+            <td>${formatSignedPercent(item.priceChange24h)}</td>
+            <td>${formatUsd(item.quoteVolume24h)}</td>
+            <td>${escapeHtml(item.structure)}</td>
+            <td>${escapeHtml(item.volumeSignal)}</td>
+            <td>${escapeHtml(item.oiSignal)}</td>
+            <td>${escapeHtml(item.fundingSignal)}</td>
+            <td>
+              <strong>${escapeHtml(item.entryZone)}</strong>
+              <small>止损 ${escapeHtml(item.stopLoss)} · 目标 ${escapeHtml(item.target1)} / ${escapeHtml(item.target2)}</small>
+            </td>
+            <td>${renderList(item.reasons)}</td>
+            <td>${renderList(item.risks)}</td>
+            <td><span class="status-chip">${escapeHtml(item.status)}</span></td>
+          </tr>
+        `,
+      )
+      .join("") || `<tr><td colspan="15"><div class="empty">当前筛选条件下暂无候选；完整扫描器接入后会保留剔除原因。</div></td></tr>`;
+}
+
+function buildOpportunityRow(item, rank) {
+  const direction = inferOpportunityDirection(item);
+  const currentPrice = Number(item.price || 0);
+  const priceChange24h = Number(item.price_change_24h || 0);
+  const quoteVolume24h = Number(item.quote_volume_24h || 0);
+  const oi1h = Number(item.oi_change_1h || 0);
+  const oi24h = Number(item.oi_change_24h || 0);
+  const fundingPct = Number(item.funding_rate || 0) * 100;
+  const riskScore = Number(item.risk_score || 0);
+  const score = Math.max(0, Math.min(100, riskScore));
+  const entryZone = buildEntryZone(currentPrice, direction);
+  const stopLoss = buildStopLoss(currentPrice, direction);
+  const target1 = buildTarget(currentPrice, direction, 1);
+  const target2 = buildTarget(currentPrice, direction, 2);
+
+  return {
+    rank,
+    symbol: item.symbol || "",
+    coin: item.coin || coinFromSymbol(item.symbol),
+    direction,
+    score,
+    currentPrice,
+    priceChange24h,
+    quoteVolume24h,
+    structure: inferStructureLabel(direction, priceChange24h, item.price_position_24h),
+    volumeSignal: inferVolumeSignal(item.quote_volume_change_24h),
+    oiSignal: inferOiSignal(direction, oi1h, oi24h),
+    fundingSignal: inferFundingSignal(direction, fundingPct),
+    entryZone,
+    stopLoss,
+    target1,
+    target2,
+    reasons: buildOpportunityReasons(item, direction),
+    risks: buildOpportunityRisks(item, direction),
+    status: inferOpportunityStatus(direction, score, fundingPct),
+  };
+}
+
+function inferOpportunityDirection(item) {
+  const action = item.outcome_probability?.trade_action;
+  if (action === "做多") return "LONG";
+  if (action === "做空") return "SHORT";
+  const fundingPct = Number(item.funding_rate || 0) * 100;
+  const priceChange1h = Number(item.price_change_1h || 0);
+  const oi1h = Number(item.oi_change_1h || 0);
+  if (fundingPct <= -0.08 && oi1h >= 5) return "SHORT";
+  if (fundingPct >= 0.08 && oi1h >= 5) return "LONG";
+  if (priceChange1h > 0 && oi1h > 0 && Math.abs(fundingPct) < 0.05) return "LONG";
+  if (priceChange1h < 0 && oi1h > 0 && Math.abs(fundingPct) < 0.05) return "SHORT";
+  return "WATCH";
+}
+
+function inferStructureLabel(direction, priceChange24h, position24h) {
+  const position = Number(position24h || 0);
+  if (direction === "LONG") return position > 70 ? "15m强势 / 1H偏多" : "等待突破确认";
+  if (direction === "SHORT") return position < 35 || priceChange24h < 0 ? "15m偏弱 / 1H承压" : "上涨后去杠杆观察";
+  return "结构待确认";
+}
+
+function inferVolumeSignal(value) {
+  const change = Number(value || 0);
+  if (change >= 100) return "成交额显著放大";
+  if (change >= 20) return "成交额温和放大";
+  if (change <= -30) return "成交额收缩";
+  return "量能一般";
+}
+
+function inferOiSignal(direction, oi1h, oi24h) {
+  const label = `OI 1h ${formatSignedPercent(oi1h)} / 24h ${formatSignedPercent(oi24h)}`;
+  if (Math.abs(oi1h) >= 8) return `${label}，杠杆变化较快`;
+  if (direction === "LONG" && oi1h > 0) return `${label}，新多观察`;
+  if (direction === "SHORT" && oi1h > 0) return `${label}，新空观察`;
+  return label;
+}
+
+function inferFundingSignal(direction, fundingPct) {
+  const label = `Funding ${formatSignedPercent(fundingPct)}`;
+  if (Math.abs(fundingPct) >= 0.1) return `${label}，拥挤`;
+  if (direction === "LONG" && fundingPct > 0) return `${label}，偏温和`;
+  if (direction === "SHORT" && fundingPct < 0) return `${label}，偏温和`;
+  return `${label}，中性`;
+}
+
+function buildOpportunityReasons(item, direction) {
+  const reasons = [];
+  if (item.anomaly_tag) reasons.push(item.anomaly_tag);
+  if (item.outcome_probability?.basis) reasons.push(item.outcome_probability.basis);
+  if (direction !== "WATCH") reasons.push(`${direction} 方向来自现有后验概率和 OI/Funding 映射`);
+  return reasons.length ? reasons.slice(0, 3) : ["等待完整扫描器输出结构、量能和风险收益比拆解"];
+}
+
+function buildOpportunityRisks(item, direction) {
+  const risks = [];
+  if (Math.abs(Number(item.funding_rate || 0) * 100) >= 0.1) risks.push("Funding 较极端，可能出现反向挤压");
+  if (Math.abs(Number(item.price_change_24h || 0)) >= 20) risks.push("24h 波动较大，追单风险偏高");
+  if (direction === "WATCH") risks.push("结构或方向条件不足，暂不标记为交易计划");
+  return risks.length ? risks.slice(0, 3) : ["BTC 大环境字段未接入，需以后端完整扫描结果为准"];
+}
+
+function inferOpportunityStatus(direction, score, fundingPct) {
+  if (direction === "WATCH") return "观察";
+  if (Math.abs(fundingPct) >= 0.1) return "风险过热";
+  if (score >= 80) return direction === "LONG" ? "等待回踩" : "等待反抽";
+  return "可关注";
+}
+
+function buildEntryZone(price, direction) {
+  if (!price) return "待计算";
+  const low = direction === "SHORT" ? price * 0.998 : price * 0.995;
+  const high = direction === "SHORT" ? price * 1.005 : price * 1.002;
+  return `${formatNumber(low, 6)} - ${formatNumber(high, 6)}`;
+}
+
+function buildStopLoss(price, direction) {
+  if (!price || direction === "WATCH") return "待结构确认";
+  const value = direction === "SHORT" ? price * 1.018 : price * 0.982;
+  return formatNumber(value, 6);
+}
+
+function buildTarget(price, direction, level) {
+  if (!price || direction === "WATCH") return "待结构确认";
+  const distance = level === 1 ? 0.018 : 0.036;
+  const value = direction === "SHORT" ? price * (1 - distance) : price * (1 + distance);
+  return formatNumber(value, 6);
+}
+
+function renderDirection(direction) {
+  const tone = direction === "LONG" ? "long" : direction === "SHORT" ? "short" : "watch";
+  return `<span class="direction ${tone}">${escapeHtml(direction)}</span>`;
+}
+
+function renderList(items) {
+  return `<ul class="compact-list">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function renderPatterns() {
+  const payload = state.patterns || state.summary?.patterns || {};
+  const signals = payload.signals || {};
+  const stats = payload.stats || {};
+  renderPatternGroup(
+    "#patternOiShortRows",
+    signals.oi_4h_short_reversal || [],
+    stats.oi_4h_short_reversal,
+    "down",
+  );
+  renderPatternGroup(
+    "#patternNegFundingRows",
+    signals.high_neg_funding_12h_short || [],
+    stats.high_neg_funding_12h_short,
+    "down",
+  );
+  renderPatternGroup(
+    "#patternShortCrowdRows",
+    signals.short_crowd_high_volume_12h_short || [],
+    stats.short_crowd_high_volume_12h_short,
+    "down",
+  );
+  renderPatternGroup(
+    "#patternLongRows",
+    signals.strict_momentum_4h_long || [],
+    stats.strict_momentum_4h_long,
+    "up",
+  );
+}
+
+function hasPatternPayload(payload) {
+  return Boolean(payload?.signals || payload?.stats);
+}
+
+function renderPatternGroup(selector, rows, stat, oddsKey) {
+  const target = $(selector);
+  if (!target) return;
+  const summary = stat ? renderPatternStat(stat, oddsKey) : "";
+  const body = rows.length
+    ? rows
+        .map(
+          (item, index) => `
+            <tr>
+              <td>${index + 1}</td>
+              <td><strong>${escapeHtml(item.coin || coinFromSymbol(item.symbol))}</strong><br><small>${escapeHtml(item.symbol)}</small></td>
+              <td>${renderDirection(item.entry_side || (oddsKey === "up" ? "LONG" : "SHORT"))}</td>
+              <td><span class="score ${scoreTone(item.short_setup_score ?? item.pattern_score)}">${item.short_setup_score ?? item.pattern_score ?? 0}</span></td>
+              <td>${formatPercent(item.oi_change_1h)}</td>
+              <td>${formatSignedPercent(item.price_change_1h)}</td>
+              <td>${formatPercent(item.price_position_24h)}</td>
+              <td>${formatPercent((item.funding_rate || 0) * 100)}</td>
+              <td>${item.evidence_sample_count ?? 0}</td>
+              <td>${formatPercent(oddsKey === "up" ? item.up_probability_pct : item.down_probability_pct)}</td>
+              <td>${formatSignedPercent(item.median_return_pct)}</td>
+            </tr>
+          `,
+        )
+        .join("")
+    : `<tr><td colspan="11"><div class="empty">当前最新一轮没有命中这个模式</div></td></tr>`;
+  target.innerHTML = summary + body;
+}
+
+function renderPatternStat(stat, oddsKey) {
+  const horizon = oddsKey === "up" ? "12" : "4";
+  const data = stat.horizons?.[horizon] || {};
+  const odds = oddsKey === "up" ? data.up_probability_pct : data.down_probability_pct;
+  return `
+    <tr class="pattern-summary-row">
+      <td colspan="11">
+        历史命中 ${stat.total_matches ?? 0} 次，${horizon}h 可回测样本 ${data.sample_count ?? 0}，
+        ${oddsKey === "up" ? "上涨" : "下跌"}概率 ${formatPercent(odds)}，
+        中位数 ${formatSignedPercent(data.median_return_pct)}
+      </td>
+    </tr>
+  `;
+}
+
+function renderConfidence(value) {
+  const label = { high: "高", medium: "中", low: "低" }[value] || value || "--";
+  const tone = value === "high" ? "high" : value === "medium" ? "medium" : "low";
+  return `<span class="confidence ${tone}">${escapeHtml(label)}</span>`;
 }
 
 function renderSummary() {
@@ -396,9 +680,13 @@ function renderTags(value) {
 
 function renderOutcome(outcome) {
   if (!outcome) return `<span class="muted">待积累</span>`;
+  const tradeHint = outcome.trade_action && outcome.trade_action !== "观望"
+    ? `<small class="trade-hint">${escapeHtml(outcome.trade_label || `可关注${outcome.trade_action}`)}</small>`
+    : "";
   return `
     <span class="outcome-label">${escapeHtml(outcome.direction || "中性观察")}</span>
     <small>${escapeHtml(outcome.horizon || "1-6h")} · 涨 ${outcome.up_probability ?? "--"}% / 跌 ${outcome.down_probability ?? "--"}%</small>
+    ${tradeHint}
   `;
 }
 
@@ -459,6 +747,12 @@ function formatSignedPercent(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "N/A";
   const number = Number(value);
   return `${number >= 0 ? "+" : ""}${number.toFixed(2)}%`;
+}
+
+function formatSignedNumber(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "N/A";
+  const number = Number(value);
+  return `${number >= 0 ? "+" : ""}${number.toFixed(0)}`;
 }
 
 function formatUsd(value) {

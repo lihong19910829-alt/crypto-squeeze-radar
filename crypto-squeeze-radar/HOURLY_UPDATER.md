@@ -13,6 +13,7 @@ python run_once.py
 
 - 抓取最新市场数据
 - 写入 CSV 和 SQLite 历史记录
+- 检测 OI 模式信号并推送到微信（已配置 `PUSHPLUS_TOKEN` 时默认开启）
 - 生成报告、推文草稿和 X dry-run 预览
 - 导出 `web/data.js`
 - 同步静态文件到 `D:\Codex\加密货币监控\vercel-site`
@@ -25,6 +26,8 @@ python run_once.py
 cd D:\Codex\加密货币监控\crypto-squeeze-radar
 .\install_windows_task.ps1
 ```
+
+安装脚本会创建 `CryptoSqueezeRadarHourly`，频率为每 1 小时运行一次。
 
 测试任务：
 

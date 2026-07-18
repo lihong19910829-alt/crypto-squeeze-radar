@@ -62,6 +62,11 @@ class HyperliquidClient:
             open_interest_value_usd=oi_value_usd,
             oi_change_1h_pct=None,
             oi_change_24h_pct=None,
+            price_change_24h_pct=None,
+            price_position_24h_pct=None,
+            high_24h=None,
+            low_24h=None,
+            quote_volume_24h=None,
             long_liquidation_usd=0.0,
             short_liquidation_usd=0.0,
             source="hyperliquid",
@@ -77,4 +82,3 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-

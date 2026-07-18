@@ -20,10 +20,13 @@ from config import (
 )
 from data_sources.exchange import BinanceFuturesClient
 from data_sources.hyperliquid import HyperliquidClient
+from indicators.market_context import enrich_market_context
 from indicators.scoring import evaluate_snapshot
+from output.pattern_push import push_pattern_signals
 from output.report import save_report
 from output.tweets import save_tweets
 from output.x_publisher import publish_eligible_tweets
+from patterns.oi_pattern_monitor import run_pattern_monitor
 from storage.sqlite_store import save_market_snapshots
 
 
@@ -33,6 +36,7 @@ def main() -> None:
     hyperliquid = HyperliquidClient()
     evaluated: list[dict[str, Any]] = []
     premium_map = get_premium_map(binance) if MONITOR_ALL_BINANCE_SYMBOLS else {}
+    ticker_24h_map = get_24h_ticker_map(binance) if MONITOR_ALL_BINANCE_SYMBOLS else {}
     universe = get_monitoring_universe(binance, bool(premium_map))
 
     print(f"本轮监控交易对数量：{len(universe)}")
@@ -41,7 +45,7 @@ def main() -> None:
     # Binance 全量永续合约数量较多，串行抓取很容易超过计划任务窗口，所以这里并发执行。
     with ThreadPoolExecutor(max_workers=max(1, BINANCE_MAX_WORKERS)) as executor:
         futures = [
-            executor.submit(process_symbol, item, binance, hyperliquid, premium_map)
+            executor.submit(process_symbol, item, binance, hyperliquid, premium_map, ticker_24h_map)
             for item in universe
         ]
         for index, future in enumerate(as_completed(futures), start=1):
@@ -49,9 +53,12 @@ def main() -> None:
             if index % 50 == 0 or index == len(futures):
                 print(f"已完成 {index}/{len(futures)} 个交易对")
 
+    enrich_market_context(evaluated)
     ranked = sorted(evaluated, key=lambda item: item["risk_score"], reverse=True)[:TOP_N]
     append_history(evaluated)
     save_market_snapshots(evaluated)
+    pattern_payload = run_pattern_monitor(evaluated)
+    push_pattern_signals(pattern_payload)
     save_report(ranked)
     tweets = save_tweets(ranked)
     publish_eligible_tweets(tweets)
@@ -85,6 +92,15 @@ def get_premium_map(binance: BinanceFuturesClient) -> dict[str, Any]:
         return binance.get_all_mark_prices_and_funding()
     except Exception as error:
         print(f"Binance 批量价格/Funding 暂不可用，改为逐币抓取: {error}")
+        return {}
+
+
+def get_24h_ticker_map(binance: BinanceFuturesClient) -> dict[str, Any]:
+    """Batch read 24h ticker data for momentum, volume, and high-low context."""
+    try:
+        return binance.get_all_24h_tickers()
+    except Exception as error:
+        print(f"Binance 24h ticker unavailable, skip context fields this run: {error}")
         return {}
 
 
@@ -133,6 +149,7 @@ def process_symbol(
     binance: BinanceFuturesClient,
     hyperliquid: HyperliquidClient,
     premium_map: dict[str, Any],
+    ticker_24h_map: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """抓取并评估单个交易对；供并发线程调用。"""
     coin = item["coin"]
@@ -142,6 +159,7 @@ def process_symbol(
             coin,
             symbol=symbol,
             premium_data=premium_map.get(symbol),
+            ticker_24h_data=(ticker_24h_map or {}).get(symbol),
         )
     except Exception as binance_error:
         if MONITOR_ALL_BINANCE_SYMBOLS:
@@ -169,6 +187,14 @@ def append_history(items: list[dict[str, Any]]) -> None:
         "open_interest_value_usd",
         "oi_change_1h_pct",
         "oi_change_24h_pct",
+        "price_change_1h_pct",
+        "price_change_4h_pct",
+        "price_change_24h_pct",
+        "price_position_24h_pct",
+        "quote_volume_24h",
+        "quote_volume_change_24h_pct",
+        "funding_same_sign_count",
+        "funding_avg_abs_6",
         "long_liquidation_usd",
         "short_liquidation_usd",
         "risk_score",
@@ -193,6 +219,14 @@ def append_history(items: list[dict[str, Any]]) -> None:
                     "open_interest_value_usd": item.get("open_interest_value_usd"),
                     "oi_change_1h_pct": item.get("oi_change_1h_pct"),
                     "oi_change_24h_pct": item.get("oi_change_24h_pct"),
+                    "price_change_1h_pct": item.get("price_change_1h_pct"),
+                    "price_change_4h_pct": item.get("price_change_4h_pct"),
+                    "price_change_24h_pct": item.get("price_change_24h_pct"),
+                    "price_position_24h_pct": item.get("price_position_24h_pct"),
+                    "quote_volume_24h": item.get("quote_volume_24h"),
+                    "quote_volume_change_24h_pct": item.get("quote_volume_change_24h_pct"),
+                    "funding_same_sign_count": item.get("funding_same_sign_count"),
+                    "funding_avg_abs_6": item.get("funding_avg_abs_6"),
                     "long_liquidation_usd": item.get("long_liquidation_usd"),
                     "short_liquidation_usd": item.get("short_liquidation_usd"),
                     "risk_score": item.get("risk_score"),
@@ -219,6 +253,16 @@ def _failed_item(
         "open_interest_value_usd": None,
         "oi_change_1h_pct": None,
         "oi_change_24h_pct": None,
+        "price_change_1h_pct": None,
+        "price_change_4h_pct": None,
+        "price_change_24h_pct": None,
+        "price_position_24h_pct": None,
+        "high_24h": None,
+        "low_24h": None,
+        "quote_volume_24h": None,
+        "quote_volume_change_24h_pct": None,
+        "funding_same_sign_count": None,
+        "funding_avg_abs_6": None,
         "long_liquidation_usd": 0.0,
         "short_liquidation_usd": 0.0,
         "source": "none",

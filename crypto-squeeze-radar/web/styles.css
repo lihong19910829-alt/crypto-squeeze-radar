@@ -271,6 +271,63 @@ button {
   gap: 20px;
 }
 
+.pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.pattern-box {
+  min-width: 0;
+}
+
+.pattern-box h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.pattern-box p {
+  margin: 5px 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.pattern-table {
+  min-width: 1180px;
+}
+
+.pattern-summary-row td {
+  background: #f7f9fc;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.confidence {
+  display: inline-flex;
+  min-width: 34px;
+  justify-content: center;
+  padding: 4px 7px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.confidence.high {
+  background: #e8f7ef;
+  color: var(--green);
+}
+
+.confidence.medium {
+  background: #fff4dd;
+  color: var(--amber);
+}
+
+.confidence.low {
+  background: #eef2f7;
+  color: var(--muted);
+}
+
 .panel {
   padding: 18px;
   min-width: 0;
@@ -575,6 +632,7 @@ td small,
 
   .metric-grid,
   .grid-main,
+  .pattern-grid,
   .motion-panel {
     grid-template-columns: 1fr;
   }

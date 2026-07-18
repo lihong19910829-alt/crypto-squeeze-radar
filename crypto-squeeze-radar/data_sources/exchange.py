@@ -32,6 +32,11 @@ class MarketSnapshot:
     open_interest_value_usd: float | None
     oi_change_1h_pct: float | None
     oi_change_24h_pct: float | None
+    price_change_24h_pct: float | None
+    price_position_24h_pct: float | None
+    high_24h: float | None
+    low_24h: float | None
+    quote_volume_24h: float | None
     long_liquidation_usd: float | None
     short_liquidation_usd: float | None
     source: str
@@ -77,6 +82,11 @@ class BinanceFuturesClient:
         rows = self._get("/fapi/v1/premiumIndex")
         return {row.get("symbol"): row for row in rows if row.get("symbol")}
 
+    def get_all_24h_tickers(self) -> dict[str, dict[str, Any]]:
+        """一次性获取全部交易对 24h 行情，用于价格动量和成交量上下文。"""
+        rows = self._get("/fapi/v1/ticker/24hr")
+        return {row.get("symbol"): row for row in rows if row.get("symbol")}
+
     def get_trading_symbols(self) -> list[dict[str, str]]:
         """自动发现 Binance U 本位永续里正在交易的 USDT 永续合约。"""
         data = self._get("/fapi/v1/exchangeInfo")
@@ -119,6 +129,7 @@ class BinanceFuturesClient:
         coin: str,
         symbol: str | None = None,
         premium_data: dict[str, Any] | None = None,
+        ticker_24h_data: dict[str, Any] | None = None,
         fetch_liquidations: bool = ENABLE_BINANCE_FORCE_ORDERS,
     ) -> MarketSnapshot:
         """聚合 Binance 多个接口，形成统一快照。"""
@@ -130,6 +141,12 @@ class BinanceFuturesClient:
             funding_rate = _to_float(premium_data.get("lastFundingRate"))
         else:
             price, funding_rate = self.get_mark_price_and_funding(symbol)
+        ticker_24h_data = ticker_24h_data or {}
+        high_24h = _to_float(ticker_24h_data.get("highPrice"))
+        low_24h = _to_float(ticker_24h_data.get("lowPrice"))
+        price_change_24h_pct = _to_float(ticker_24h_data.get("priceChangePercent"))
+        quote_volume_24h = _to_float(ticker_24h_data.get("quoteVolume"))
+        price_position_24h_pct = _price_position(price, low_24h, high_24h)
         open_interest = self.get_open_interest(symbol)
 
         oi_change_1h_pct, oi_change_24h_pct, oi_value_usd = None, None, None
@@ -162,6 +179,11 @@ class BinanceFuturesClient:
             open_interest_value_usd=oi_value_usd,
             oi_change_1h_pct=oi_change_1h_pct,
             oi_change_24h_pct=oi_change_24h_pct,
+            price_change_24h_pct=price_change_24h_pct,
+            price_position_24h_pct=price_position_24h_pct,
+            high_24h=high_24h,
+            low_24h=low_24h,
+            quote_volume_24h=quote_volume_24h,
             long_liquidation_usd=long_liq,
             short_liquidation_usd=short_liq,
             source="binance",
@@ -202,6 +224,13 @@ def _latest_oi_value(rows: list[dict[str, Any]]) -> float | None:
     if not rows:
         return None
     return _to_float(rows[-1].get("sumOpenInterestValue"))
+
+
+def _price_position(price: float | None, low: float | None, high: float | None) -> float | None:
+    """计算当前价格在 24h 高低区间里的位置，0=低点，100=高点。"""
+    if price is None or low is None or high is None or high <= low:
+        return None
+    return (price - low) / (high - low) * 100
 
 
 def _sum_liquidations_last_hour(orders: list[dict[str, Any]]) -> tuple[float, float]:

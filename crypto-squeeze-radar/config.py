@@ -51,6 +51,15 @@ TWEETS_MD_FILE = OUTPUT_DIR / "tweets.md"
 REPORT_MD_FILE = OUTPUT_DIR / "report.md"
 X_POST_PREVIEW_JSON_FILE = OUTPUT_DIR / "x_post_preview.json"
 X_POST_PREVIEW_MD_FILE = OUTPUT_DIR / "x_post_preview.md"
+PATTERN_SQLITE_DB_FILE = STORAGE_DIR / "pattern_monitor.sqlite3"
+PATTERN_SIGNALS_JSON_FILE = OUTPUT_DIR / "pattern_signals.json"
+
+# OI 模式微信推送配置。已配置 PushPlus/ServerChan token 时默认开启。
+PATTERN_PUSH_CHANNEL = os.getenv("PATTERN_PUSH_CHANNEL", "pushplus").lower()
+PUSHPLUS_TOKEN = os.getenv("PUSHPLUS_TOKEN", "")
+SERVERCHAN_SENDKEY = os.getenv("SERVERCHAN_SENDKEY", "")
+PATTERN_PUSH_DEFAULT = "true" if PUSHPLUS_TOKEN or SERVERCHAN_SENDKEY else "false"
+PATTERN_PUSH_ENABLED = os.getenv("PATTERN_PUSH_ENABLED", PATTERN_PUSH_DEFAULT).lower() == "true"
 
 # HTTP 超时时间，避免某个公开 API 卡住整个任务。
 HTTP_TIMEOUT_SECONDS = 12

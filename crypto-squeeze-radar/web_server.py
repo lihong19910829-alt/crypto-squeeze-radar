@@ -8,7 +8,14 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from config import BASE_DIR, SQLITE_DB_FILE, TOP_N, TWEETS_JSON_FILE, X_POST_PREVIEW_JSON_FILE
+from config import (
+    BASE_DIR,
+    PATTERN_SIGNALS_JSON_FILE,
+    SQLITE_DB_FILE,
+    TOP_N,
+    TWEETS_JSON_FILE,
+    X_POST_PREVIEW_JSON_FILE,
+)
 from indicators.outcome_probability import estimate_outcome_probability
 
 
@@ -34,6 +41,8 @@ class RadarRequestHandler(SimpleHTTPRequestHandler):
             return self._send_json(read_json_file(TWEETS_JSON_FILE, []))
         if parsed.path == "/api/x-preview":
             return self._send_json(read_json_file(X_POST_PREVIEW_JSON_FILE, {}))
+        if parsed.path == "/api/patterns":
+            return self._send_json(read_json_file(PATTERN_SIGNALS_JSON_FILE, {}))
         return super().do_GET()
 
     def _send_json(self, payload: object) -> None:
@@ -59,6 +68,7 @@ def build_summary() -> dict[str, object]:
         "last_updated": last_updated,
         "coins": rows,
         "top": sorted(rows, key=lambda row: row.get("risk_score") or 0, reverse=True)[:TOP_N],
+        "patterns": read_json_file(PATTERN_SIGNALS_JSON_FILE, {}),
         "tweet_count": len(tweets),
         "publish_candidates": len(high_risk),
         "x_preview": {
@@ -78,6 +88,9 @@ def load_latest_snapshots() -> list[dict[str, object]]:
     sql = """
         SELECT timestamp_utc, coin, symbol, price, funding_rate, open_interest,
                oi_change_1h, oi_change_24h, long_liquidation, short_liquidation,
+               price_change_1h, price_change_4h, price_change_24h,
+               price_position_24h, quote_volume_24h, quote_volume_change_24h,
+               funding_same_sign_count, funding_avg_abs_6,
                risk_score, anomaly_tag, source
         FROM market_snapshots
         WHERE timestamp_utc = (
@@ -167,6 +180,9 @@ def load_history(limit: int) -> list[dict[str, object]]:
         FROM (
             SELECT timestamp_utc, coin, symbol, price, funding_rate, open_interest,
                    oi_change_1h, oi_change_24h, long_liquidation, short_liquidation,
+                   price_change_1h, price_change_4h, price_change_24h,
+                   price_position_24h, quote_volume_24h, quote_volume_change_24h,
+                   funding_same_sign_count, funding_avg_abs_6,
                    risk_score, anomaly_tag, source
             FROM market_snapshots
             ORDER BY timestamp_utc DESC, symbol ASC
