@@ -91,12 +91,14 @@ def load_latest_snapshots() -> list[dict[str, object]]:
                price_change_1h, price_change_4h, price_change_24h,
                price_position_24h, quote_volume_24h, quote_volume_change_24h,
                funding_same_sign_count, funding_avg_abs_6,
-               risk_score, anomaly_tag, source
+               risk_score, anomaly_tag, source, scan_mode, universe_reason
         FROM market_snapshots
         WHERE timestamp_utc = (
             SELECT MAX(timestamp_utc)
             FROM market_snapshots
+            WHERE COALESCE(scan_mode, 'signal_scan') = 'signal_scan'
         )
+          AND COALESCE(scan_mode, 'signal_scan') = 'signal_scan'
         ORDER BY risk_score DESC, symbol ASC
     """
     rows = query_rows(sql)
@@ -183,8 +185,9 @@ def load_history(limit: int) -> list[dict[str, object]]:
                    price_change_1h, price_change_4h, price_change_24h,
                    price_position_24h, quote_volume_24h, quote_volume_change_24h,
                    funding_same_sign_count, funding_avg_abs_6,
-                   risk_score, anomaly_tag, source
+                   risk_score, anomaly_tag, source, scan_mode, universe_reason
             FROM market_snapshots
+            WHERE COALESCE(scan_mode, 'signal_scan') = 'signal_scan'
             ORDER BY timestamp_utc DESC, symbol ASC
             LIMIT ?
         )

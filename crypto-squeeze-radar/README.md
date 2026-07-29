@@ -166,6 +166,8 @@ python main.py
 - `short_liquidation`：空头清算金额
 - `risk_score`：风险评分
 - `anomaly_tag`：异常标签
+- `scan_mode`：数据来源，`signal_scan` 表示每小时精选池，`full_scan` 表示 4 小时全市场补数
+- `universe_reason`：信号扫描中进入精选池的原因
 
 ## 回测异常信号
 
@@ -183,22 +185,27 @@ python backtest_anomaly.py --tag 杠杆过热 --min-score 60
 
 注意：刚开始数据量少时，未来 4 小时、24 小时样本可能为空。持续按小时运行后，统计结果才会逐渐有意义。
 
-## 如何每小时自动运行
+## 如何自动运行
 
 ### Windows 任务计划程序
 
-1. 打开“任务计划程序”
-2. 创建基本任务
-3. 触发器选择“每天”，高级设置里勾选“重复任务间隔：1 小时”
-4. 操作选择“启动程序”
-5. 程序填写 Python 路径，例如：`python`
-6. 参数填写：`main.py`
-7. 起始于填写项目目录，例如：`D:\Codex\加密货币监控\crypto-squeeze-radar`
+推荐使用项目脚本安装：
+
+```powershell
+cd D:\Codex\加密货币监控\crypto-squeeze-radar
+.\install_windows_task.ps1
+```
+
+安装后会有两条任务：
+
+- `CryptoSqueezeRadarHourly`：每小时整点启动，在第 5 秒开始轻量全市场筛选和精选池深度 OI 扫描，用于出信号、推送、交易和部署
+- `CryptoSqueezeRadarFullScan4H`：每 4 小时第 10 分钟运行全市场深度 OI 扫描，只补数据库
 
 ### Linux / macOS cron
 
 ```bash
-0 * * * * cd /path/to/crypto-squeeze-radar && python3 main.py
+0 * * * * sleep 5 && cd /path/to/crypto-squeeze-radar && python3 run_once.py
+10 */4 * * * cd /path/to/crypto-squeeze-radar && RADAR_SCAN_MODE=full_scan python3 run_full_scan_once.py
 ```
 
 ## 免责声明
@@ -238,4 +245,4 @@ MONITOR_ALL_BINANCE_SYMBOLS=false
 
 然后修改 `config.py` 里的 `WATCHLIST` 和 `BINANCE_SYMBOLS`。
 
-监控全部交易对时，一轮运行会比 4 个核心币种慢一些，因为每个交易对都需要读取 OI 和 OI 历史。建议每小时运行一次即可。
+默认每小时信号任务会先用批量行情覆盖全市场，再只对精选池读取 OI 和 OI 历史；每 4 小时补一次全市场深度 OI 数据。这样信号更快，长期样本也不会丢。

@@ -12,6 +12,7 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 
 document.addEventListener("DOMContentLoaded", () => {
+  setupUiChrome();
   $("#refreshBtn").addEventListener("click", handleRefresh);
   $("#symbolSelect").addEventListener("change", (event) => {
     selectSymbol(event.target.value);
@@ -36,6 +37,20 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   loadDashboard();
 });
+
+function setupUiChrome() {
+  document.querySelectorAll('.nav-list a[href="#opportunity"], .nav-list a[href="#tweets"]').forEach((link) => {
+    link.remove();
+  });
+  const patternLink = document.querySelector('.nav-list a[href="#patterns"]');
+  if (patternLink) patternLink.classList.add("active");
+  const overviewLink = document.querySelector('.nav-list a[href="#overview"]');
+  if (overviewLink) overviewLink.classList.remove("active");
+  const patternIntro = document.querySelector("#patterns .panel-head p");
+  if (patternIntro) {
+    patternIntro.textContent = "按复盘后的空头模式展示交易计划；后台保留评分与样本统计，前端只呈现执行字段。";
+  }
+}
 
 function handleRefresh() {
   if (window.location.protocol === "file:") {
@@ -333,12 +348,6 @@ function renderPatterns() {
     stats.short_crowd_high_volume_12h_short,
     "down",
   );
-  renderPatternGroup(
-    "#patternLongRows",
-    signals.strict_momentum_4h_long || [],
-    stats.strict_momentum_4h_long,
-    "up",
-  );
 }
 
 function hasPatternPayload(payload) {
@@ -351,20 +360,26 @@ function renderPatternGroup(selector, rows, stat, oddsKey) {
   const summary = stat ? renderPatternStat(stat, oddsKey) : "";
   const body = rows.length
     ? rows
+        .slice()
+        .sort((a, b) =>
+          Number(isPatternStar(b)) - Number(isPatternStar(a)) ||
+          Number(getPositionMultiplier(b) || 0) - Number(getPositionMultiplier(a) || 0) ||
+          Number(b.short_setup_score || 0) - Number(a.short_setup_score || 0),
+        )
         .map(
           (item, index) => `
             <tr>
               <td>${index + 1}</td>
+              <td>${renderStar(item)}</td>
               <td><strong>${escapeHtml(item.coin || coinFromSymbol(item.symbol))}</strong><br><small>${escapeHtml(item.symbol)}</small></td>
-              <td>${renderDirection(item.entry_side || (oddsKey === "up" ? "LONG" : "SHORT"))}</td>
-              <td><span class="score ${scoreTone(item.short_setup_score ?? item.pattern_score)}">${item.short_setup_score ?? item.pattern_score ?? 0}</span></td>
-              <td>${formatPercent(item.oi_change_1h)}</td>
-              <td>${formatSignedPercent(item.price_change_1h)}</td>
-              <td>${formatPercent(item.price_position_24h)}</td>
-              <td>${formatPercent((item.funding_rate || 0) * 100)}</td>
-              <td>${item.evidence_sample_count ?? 0}</td>
-              <td>${formatPercent(oddsKey === "up" ? item.up_probability_pct : item.down_probability_pct)}</td>
-              <td>${formatSignedPercent(item.median_return_pct)}</td>
+              <td>${renderTradeGrade(item)}</td>
+              <td><strong>${formatMultiplier(getPositionMultiplier(item))}</strong></td>
+              <td>${formatNumber(item.entry_price || item.price, 8)}</td>
+              <td><strong class="short-price">${formatNumber(item.stop_loss_price, 8)}</strong><small>${formatPercent(item.stop_loss_pct)}</small></td>
+              <td><strong>${formatNumber(item.first_take_profit_price, 8)}</strong><small>平 ${formatPercent(getCloseRatios(item).first, 0)}</small></td>
+              <td><strong>${formatNumber(item.final_take_profit_price, 8)}</strong><small>平 ${formatPercent(getCloseRatios(item).final, 0)}</small></td>
+              <td>${item.max_hold_hours ?? "--"}H<small>余 ${formatPercent(getCloseRatios(item).time, 0)}</small></td>
+              <td>${escapeHtml(getExecutionNote(item))}</td>
             </tr>
           `,
         )
@@ -386,6 +401,74 @@ function renderPatternStat(stat, oddsKey) {
       </td>
     </tr>
   `;
+}
+
+function renderStar(item) {
+  const starred = isPatternStar(item);
+  return `<span class="star-badge ${starred ? "on" : "off"}">${starred ? "★" : "·"}</span>`;
+}
+
+function renderTradeGrade(item) {
+  const grade = item.trade_grade || (isPatternStar(item) ? (item.pattern_key === "short_crowd_high_volume_12h_short" ? "主交易" : "可交易") : "观察");
+  const tone = isPatternStar(item) ? "trade" : grade.includes("小仓") ? "small" : "watch";
+  return `<span class="grade-chip ${tone}">${escapeHtml(grade)}</span>`;
+}
+
+function isPatternStar(item) {
+  if (item.is_star !== undefined && item.is_star !== null) return Boolean(item.is_star);
+  const strongReaction =
+    item.entry_side === "SHORT" &&
+    Number(item.price_position_24h || 0) >= 80 &&
+    Number(item.price_position_24h || 0) <= 90 &&
+    Number(item.funding_rate || 0) <= -0.001 &&
+    (Number(item.price_change_24h || 0) >= 20 || Number(item.quote_volume_change_24h || 0) >= 100) &&
+    Number(item.price_change_1h || 0) > -3 &&
+    item.market_regime !== "strong";
+  if (strongReaction) return true;
+  return (
+    item.entry_side === "SHORT" &&
+    Number(item.short_setup_score || 0) >= 65 &&
+    Number(item.evidence_sample_count || 0) >= 15 &&
+    Number(item.down_probability_pct || 0) >= 55 &&
+    Number(item.price_change_1h || 0) > -3 &&
+    item.market_regime !== "strong"
+  );
+}
+
+function getPositionMultiplier(item) {
+  if (item.position_multiplier !== undefined && item.position_multiplier !== null) return item.position_multiplier;
+  if (isPatternStar(item)) {
+    if (item.pattern_key === "short_crowd_high_volume_12h_short") return 1;
+    if (item.pattern_key === "high_neg_funding_12h_short") return 0.8;
+    return Number(item.short_setup_score || 0) >= 80 ? 0.8 : 0.7;
+  }
+  return Number(item.mode_hit_count || 1) >= 2 ? 0.5 : 0.25;
+}
+
+function getCloseRatios(item) {
+  if (item.first_take_profit_close_pct !== undefined && item.first_take_profit_close_pct !== null) {
+    return {
+      first: Number(item.first_take_profit_close_pct || 0),
+      final: Number(item.final_take_profit_close_pct || 0),
+      time: Number(item.time_exit_close_pct || 0),
+    };
+  }
+  if (item.pattern_key === "short_crowd_high_volume_12h_short" && isPatternStar(item)) {
+    return { first: 40, final: 40, time: 20 };
+  }
+  return { first: 50, final: 30, time: 20 };
+}
+
+function getExecutionNote(item) {
+  if (item.execution_note) return item.execution_note;
+  if (isPatternStar(item)) return "标星：可按计划交易，仍优先等反抽失败。";
+  if (Number(item.mode_hit_count || 1) >= 2) return "未标星但多模式共振：小仓，必须等反抽失败。";
+  return "未标星单模式：只进观察池。";
+}
+
+function formatMultiplier(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
+  return `${Number(value).toFixed(2)}x`;
 }
 
 function renderConfidence(value) {
@@ -738,9 +821,9 @@ function formatNumber(value, digits = 2) {
   return Number(value).toLocaleString("zh-CN", { maximumFractionDigits: digits });
 }
 
-function formatPercent(value) {
+function formatPercent(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "N/A";
-  return `${Number(value).toFixed(2)}%`;
+  return `${Number(value).toFixed(digits)}%`;
 }
 
 function formatSignedPercent(value) {

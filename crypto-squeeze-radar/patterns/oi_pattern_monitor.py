@@ -1,9 +1,10 @@
-"""独立监控高质量做空模式，并写入单独的数据文件。"""
+"""独立监控高质量 OI 多空模式，并写入单独的数据文件。"""
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import shutil
 from bisect import bisect_left
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -15,17 +16,39 @@ from config import PATTERN_SIGNALS_JSON_FILE, PATTERN_SQLITE_DB_FILE, SQLITE_DB_
 
 
 HORIZONS = [1, 4, 6, 12, 24]
-PATTERN_VERSION = "oi-patterns-v2"
-SHORT_STOP_LOSS_PCT = 2.0
-SHORT_FIRST_TAKE_PROFIT_PCT = 2.0
-SHORT_FINAL_TAKE_PROFIT_PCT = 4.0
+PATTERN_VERSION = "oi-patterns-v3"
+SHORT_STOP_LOSS_PCT = 6.0
+SHORT_FIRST_TAKE_PROFIT_PCT = 4.0
+SHORT_FINAL_TAKE_PROFIT_PCT = 8.0
 SHORT_MAX_HOLD_HOURS = 4
+SHORT_TRADE_PLANS = {
+    "oi_4h_short_reversal": {
+        "stop_loss_pct": 4.0,
+        "first_take_profit_pct": 3.0,
+        "final_take_profit_pct": 7.0,
+        "max_hold_hours": 4,
+    },
+    "high_neg_funding_12h_short": {
+        "stop_loss_pct": 6.0,
+        "first_take_profit_pct": 8.0,
+        "final_take_profit_pct": 13.0,
+        "max_hold_hours": 12,
+    },
+    "short_crowd_high_volume_12h_short": {
+        "stop_loss_pct": 6.0,
+        "first_take_profit_pct": 8.0,
+        "final_take_profit_pct": 13.0,
+        "max_hold_hours": 12,
+    },
+}
 LONG_STOP_LOSS_PCT = 2.0
 LONG_FIRST_TAKE_PROFIT_PCT = 2.0
 LONG_FINAL_TAKE_PROFIT_PCT = 4.0
 LONG_MAX_HOLD_HOURS = 4
 HIGH_POSITION_THRESHOLD = 80
+LOW_POSITION_THRESHOLD = 20
 CHASE_DOWN_1H_LIMIT = -3
+CHASE_UP_1H_LIMIT = 3
 STRONG_MARKET_MEDIAN_24H = 0.5
 STRONG_MARKET_BREADTH = 55
 WEAK_MARKET_MEDIAN_24H = -2
@@ -33,28 +56,40 @@ WEAK_MARKET_BREADTH = 25
 
 PATTERNS = {
     "oi_4h_short_reversal": {
-        "name": "高位OI异常后4H反向空",
+        "name": "高位OI异常强势上涨后4H反向空",
         "direction": "做空候选",
         "horizon": 4,
-        "description": "24h高位叠加短时OI快速堆积，不追多，优先观察未来4小时去杠杆/回落机会；默认2%止损、2%减半、4%全止盈、4小时退出。",
+        "description": "24h高位、24h涨幅至少20%叠加短时OI快速堆积，不追多，优先观察未来4小时去杠杆/回落机会；采用4%止损、3%减半、7%终止盈、4小时退出。",
     },
     "high_neg_funding_12h_short": {
         "name": "高位负Funding弱币延续空",
         "direction": "做空候选",
         "horizon": 12,
-        "description": "24h高位、Funding显著为负且成交额充足，历史更像弱币继续回落，而不是立刻轧空。",
+        "description": "24h高位、Funding显著为负且成交额充足，历史更像弱币继续回落；按最新MAE/MFE复盘采用6%止损、8%减半、13%终止盈、12小时退出。",
     },
     "short_crowd_high_volume_12h_short": {
         "name": "空头拥挤高位放量12H空",
         "direction": "做空候选",
         "horizon": 12,
-        "description": "空头拥挤叠加24h高位和成交额爆发，优先观察拉高出货后的12小时回落。",
+        "description": "空头拥挤叠加24h高位和成交额爆发，优先观察拉高出货后的12小时回落；按最新MAE/MFE复盘采用6%止损、8%减半、13%终止盈、12小时退出。",
     },
-    "strict_momentum_4h_long": {
-        "name": "强势延续4H多",
+    "oi_4h_long_reversal": {
+        "name": "低位OI异常后4H反向多",
         "direction": "做多候选",
         "horizon": 4,
-        "description": "多头拥挤、杠杆升温且价格保持强势时，只做短线延续；弱市不启用。",
+        "description": "24h低位叠加短时OI快速堆积，不追空，优先观察未来4小时反向修复机会；默认2%止损、2%减半、4%全止盈、4小时退出。",
+    },
+    "low_pos_funding_12h_long": {
+        "name": "低位正Funding强币延续多",
+        "direction": "做多候选",
+        "horizon": 12,
+        "description": "24h低位、Funding显著为正且成交额充足，作为高位负Funding做空逻辑的反向观察。",
+    },
+    "long_crowd_low_volume_12h_long": {
+        "name": "多头拥挤低位放量12H多",
+        "direction": "做多候选",
+        "horizon": 12,
+        "description": "多头拥挤叠加24h低位和成交额爆发，优先观察杀跌释放后的12小时修复。",
     },
 }
 
@@ -121,6 +156,18 @@ def init_pattern_db(db_file: Path = PATTERN_SQLITE_DB_FILE) -> None:
                 max_hold_hours INTEGER,
                 short_setup_score INTEGER,
                 short_setup_reasons TEXT,
+                is_star INTEGER,
+                mode_hit_count INTEGER,
+                trade_grade TEXT,
+                position_multiplier REAL,
+                first_take_profit_close_pct REAL,
+                final_take_profit_close_pct REAL,
+                time_exit_close_pct REAL,
+                position_rule TEXT,
+                execution_note TEXT,
+                market_regime TEXT,
+                market_median_24h REAL,
+                market_breadth REAL,
                 created_at_utc TEXT NOT NULL
             )
             """
@@ -149,6 +196,18 @@ def init_pattern_db(db_file: Path = PATTERN_SQLITE_DB_FILE) -> None:
                 "max_hold_hours": "INTEGER",
                 "short_setup_score": "INTEGER",
                 "short_setup_reasons": "TEXT",
+                "is_star": "INTEGER",
+                "mode_hit_count": "INTEGER",
+                "trade_grade": "TEXT",
+                "position_multiplier": "REAL",
+                "first_take_profit_close_pct": "REAL",
+                "final_take_profit_close_pct": "REAL",
+                "time_exit_close_pct": "REAL",
+                "position_rule": "TEXT",
+                "execution_note": "TEXT",
+                "market_regime": "TEXT",
+                "market_median_24h": "REAL",
+                "market_breadth": "REAL",
             },
         )
         conn.execute(
@@ -194,8 +253,12 @@ def build_pattern_stats(history: list[dict[str, Any]]) -> dict[str, dict[str, An
         "short_crowd_high_volume_12h_short": [
             row for row in samples if pattern_short_crowd_high_volume_12h_short(row)
         ],
-        "strict_momentum_4h_long": [
-            row for row in samples if pattern_strict_momentum_4h_long(row)
+        "oi_4h_long_reversal": [row for row in samples if pattern_oi_4h_long_reversal(row)],
+        "low_pos_funding_12h_long": [
+            row for row in samples if pattern_low_pos_funding_12h_long(row)
+        ],
+        "long_crowd_low_volume_12h_long": [
+            row for row in samples if pattern_long_crowd_low_volume_12h_long(row)
         ],
     }
     stats: dict[str, dict[str, Any]] = {}
@@ -277,7 +340,9 @@ def detect_current_signals(
         "oi_4h_short_reversal": [],
         "high_neg_funding_12h_short": [],
         "short_crowd_high_volume_12h_short": [],
-        "strict_momentum_4h_long": [],
+        "oi_4h_long_reversal": [],
+        "low_pos_funding_12h_long": [],
+        "long_crowd_low_volume_12h_long": [],
     }
     timestamp_utc = datetime.now(timezone.utc).isoformat()
     market_regime = classify_market_regime_from_items(items)
@@ -299,9 +364,15 @@ def detect_current_signals(
             signals["short_crowd_high_volume_12h_short"].append(
                 build_signal(row, "short_crowd_high_volume_12h_short", stats)
             )
-        if pattern_strict_momentum_4h_long(row):
-            signals["strict_momentum_4h_long"].append(
-                build_signal(row, "strict_momentum_4h_long", stats)
+        if pattern_oi_4h_long_reversal(row):
+            signals["oi_4h_long_reversal"].append(build_signal(row, "oi_4h_long_reversal", stats))
+        if pattern_low_pos_funding_12h_long(row):
+            signals["low_pos_funding_12h_long"].append(
+                build_signal(row, "low_pos_funding_12h_long", stats)
+            )
+        if pattern_long_crowd_low_volume_12h_long(row):
+            signals["long_crowd_low_volume_12h_long"].append(
+                build_signal(row, "long_crowd_low_volume_12h_long", stats)
             )
 
     signals["oi_4h_short_reversal"].sort(
@@ -317,15 +388,155 @@ def detect_current_signals(
             ),
             reverse=True,
         )
-    signals["strict_momentum_4h_long"].sort(
-        key=lambda row: (
-            number(row.get("short_setup_score")),
-            number(row.get("pattern_score")),
-            number(row.get("quote_volume_24h")),
-        ),
-        reverse=True,
-    )
+    for key in ("oi_4h_long_reversal", "low_pos_funding_12h_long", "long_crowd_low_volume_12h_long"):
+        signals[key].sort(
+            key=lambda row: (
+                number(row.get("short_setup_score")),
+                number(row.get("pattern_score")),
+                number(row.get("quote_volume_24h")),
+            ),
+            reverse=True,
+        )
+    annotate_trade_plan_metadata(signals)
     return signals
+
+
+def annotate_trade_plan_metadata(signals: dict[str, list[dict[str, Any]]]) -> None:
+    """Add execution-facing fields used by push messages and dashboard tables."""
+    short_rows = [
+        row
+        for key in (
+            "oi_4h_short_reversal",
+            "high_neg_funding_12h_short",
+            "short_crowd_high_volume_12h_short",
+        )
+        for row in signals.get(key, [])
+    ]
+    modes_by_symbol: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for row in short_rows:
+        modes_by_symbol[(str(row.get("timestamp_utc")), str(row.get("symbol")))].add(
+            str(row.get("pattern_key"))
+        )
+
+    for row in short_rows:
+        mode_count = len(modes_by_symbol[(str(row.get("timestamp_utc")), str(row.get("symbol")))])
+        starred = is_star_short_signal(row)
+        row["is_star"] = starred
+        row["mode_hit_count"] = mode_count
+        row["trade_grade"] = trade_grade(row, mode_count, starred)
+        row["position_multiplier"] = position_multiplier(row, mode_count, starred)
+        first_pct, final_pct, time_pct = close_ratios(row, starred)
+        row["first_take_profit_close_pct"] = first_pct
+        row["final_take_profit_close_pct"] = final_pct
+        row["time_exit_close_pct"] = time_pct
+        row["position_rule"] = (
+            f"第一止盈平{first_pct:.0f}%，最终止盈平{final_pct:.0f}%，"
+            f"剩余{time_pct:.0f}%到时间退出"
+        )
+        row["execution_note"] = execution_note(row, mode_count, starred)
+
+
+def is_star_short_signal(row: dict[str, Any]) -> bool:
+    if str(row.get("entry_side") or "") != "SHORT":
+        return False
+    return (
+        is_high_quality_short_signal(row)
+        and number(row.get("evidence_sample_count")) >= 15
+        and number(row.get("down_probability_pct")) >= 55
+        and number(row.get("price_change_1h")) > CHASE_DOWN_1H_LIMIT
+        and str(row.get("market_regime") or "") != "strong"
+    )
+
+
+def is_high_quality_short_signal(row: dict[str, Any]) -> bool:
+    """Return whether a short signal matches the validated confirmation layer."""
+    position = number(row.get("price_position_24h"))
+    price_change_24h = number(row.get("price_change_24h"))
+    volume_change_24h = number(row.get("quote_volume_change_24h"))
+    funding = number(row.get("funding_rate"))
+    tag = str(row.get("anomaly_tag") or "")
+    no_chase = number(row.get("price_change_1h")) > CHASE_DOWN_1H_LIMIT
+    high_volume_breakout = (
+        position >= 90
+        and price_change_24h >= 20
+        and volume_change_24h >= 50
+        and no_chase
+    )
+    crowded_or_negative_funding = (
+        position >= 70
+        and price_change_24h >= 20
+        and no_chase
+        and ("空头拥挤" in tag or funding <= -0.0003)
+    )
+    return high_volume_breakout or crowded_or_negative_funding
+
+
+def short_confirmation_tier(row: dict[str, Any]) -> str:
+    """Classify the confirmation layer used for B/C risk parameters."""
+    position = number(row.get("price_position_24h"))
+    price_change_24h = number(row.get("price_change_24h"))
+    volume_change_24h = number(row.get("quote_volume_change_24h"))
+    funding = number(row.get("funding_rate"))
+    tag = str(row.get("anomaly_tag") or "")
+    no_chase = number(row.get("price_change_1h")) > CHASE_DOWN_1H_LIMIT
+    if position >= 90 and price_change_24h >= 20 and volume_change_24h >= 100 and no_chase:
+        return "premium_volume"
+    if position >= 90 and price_change_24h >= 20 and volume_change_24h >= 50 and no_chase:
+        return "volume_confirmation"
+    if (
+        position >= 70
+        and price_change_24h >= 20
+        and no_chase
+        and ("空头拥挤" in tag or funding <= -0.0003)
+    ):
+        return "crowd_funding_confirmation"
+    return "base"
+
+
+def is_strong_reaction_signal(row: dict[str, Any]) -> bool:
+    return is_high_quality_short_signal(row)
+
+
+def trade_grade(row: dict[str, Any], mode_count: int, starred: bool) -> str:
+    if starred and is_premium_short_signal(row):
+        return "主交易"
+    if starred:
+        return "可交易"
+    if mode_count >= 2:
+        return "小仓确认"
+    return "观察"
+
+
+def position_multiplier(row: dict[str, Any], mode_count: int, starred: bool) -> float:
+    if starred:
+        if is_premium_short_signal(row):
+            return 1.0
+        return 0.8
+    return 0.25 if mode_count >= 2 else 0.0
+
+
+def is_premium_short_signal(row: dict[str, Any]) -> bool:
+    return (
+        number(row.get("price_position_24h")) >= 90
+        and number(row.get("price_change_24h")) >= 20
+        and number(row.get("quote_volume_change_24h")) >= 100
+    )
+
+
+def close_ratios(row: dict[str, Any], starred: bool) -> tuple[float, float, float]:
+    if str(row.get("pattern_key")) == "short_crowd_high_volume_12h_short" and starred:
+        return 40.0, 40.0, 20.0
+    return 50.0, 30.0, 20.0
+
+
+def execution_note(row: dict[str, Any], mode_count: int, starred: bool) -> str:
+    if starred:
+        if is_premium_short_signal(row):
+            return "主交易：高位≥90%、24h涨幅≥20%、成交额放大≥100%，按1.0x计划仓位，等反抽失败。"
+        return "可交易：通过高质量确认层，按0.8x计划仓位，等反抽失败。"
+    if mode_count >= 2:
+        return "小仓确认：多模式共振但未通过确认层，最多0.25x，必须等反抽失败。"
+    return "观察：单模式或未通过确认层，不直接交易。"
 
 
 def build_signal(row: dict[str, Any], pattern_key: str, stats: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -377,8 +588,12 @@ def build_signal(row: dict[str, Any], pattern_key: str, stats: dict[str, dict[st
         "high_neg_funding_12h_short",
         "short_crowd_high_volume_12h_short",
     }:
-        signal.update(build_short_trade_plan(row, horizon))
-    elif pattern_key == "strict_momentum_4h_long":
+        signal.update(build_short_trade_plan(row, pattern_key))
+    elif pattern_key in {
+        "oi_4h_long_reversal",
+        "low_pos_funding_12h_long",
+        "long_crowd_low_volume_12h_long",
+    }:
         signal.update(build_long_trade_plan(row, horizon))
     return signal
 
@@ -402,9 +617,14 @@ def save_pattern_signals(signals: dict[str, list[dict[str, Any]]]) -> None:
                 avg_return_pct, median_return_pct, entry_side, entry_price,
                 stop_loss_pct, stop_loss_price, first_take_profit_pct,
                 first_take_profit_price, final_take_profit_pct, final_take_profit_price,
-                max_hold_hours, short_setup_score, short_setup_reasons, created_at_utc
+                max_hold_hours, short_setup_score, short_setup_reasons,
+                is_star, mode_hit_count, trade_grade, position_multiplier,
+                first_take_profit_close_pct, final_take_profit_close_pct,
+                time_exit_close_pct, position_rule, execution_note,
+                market_regime, market_median_24h, market_breadth,
+                created_at_utc
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -447,7 +667,19 @@ def save_pattern_signals(signals: dict[str, list[dict[str, Any]]]) -> None:
                     row.get("final_take_profit_price"),
                     row.get("max_hold_hours"),
                     row.get("short_setup_score"),
-                    row.get("short_setup_reasons"),
+                    text_value(row.get("short_setup_reasons")),
+                    1 if row.get("is_star") else 0,
+                    row.get("mode_hit_count"),
+                    row.get("trade_grade"),
+                    row.get("position_multiplier"),
+                    row.get("first_take_profit_close_pct"),
+                    row.get("final_take_profit_close_pct"),
+                    row.get("time_exit_close_pct"),
+                    row.get("position_rule"),
+                    row.get("execution_note"),
+                    row.get("market_regime"),
+                    row.get("market_median_24h"),
+                    row.get("market_breadth"),
                     created_at,
                 )
                 for row in rows
@@ -488,6 +720,21 @@ def write_pattern_json(payload: dict[str, Any]) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    archive_pattern_json(PATTERN_SIGNALS_JSON_FILE, payload)
+
+
+def archive_pattern_json(path: Path, payload: dict[str, Any]) -> None:
+    """Keep every generated signal payload for later trading/debug audits."""
+    try:
+        generated_at = parse_time(str(payload.get("generated_at_utc") or ""))
+    except ValueError:
+        generated_at = datetime.now(timezone.utc)
+    archive_dir = path.parent / "pattern_signal_archives"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    stamp = generated_at.strftime("%Y%m%dT%H%M%SZ")
+    archive_path = archive_dir / f"pattern_signals_{stamp}.json"
+    if not archive_path.exists():
+        shutil.copy2(path, archive_path)
 
 
 def pattern_oi_4h_short_reversal(row: dict[str, Any]) -> bool:
@@ -498,6 +745,7 @@ def pattern_oi_4h_short_reversal(row: dict[str, Any]) -> bool:
     return (
         has_oi_pressure
         and number(row.get("price_position_24h")) >= HIGH_POSITION_THRESHOLD
+        and number(row.get("price_change_24h")) >= 20
         and number(row.get("price_change_1h")) > CHASE_DOWN_1H_LIMIT
         and "多头拥挤、杠杆过热" not in tag
     )
@@ -505,9 +753,9 @@ def pattern_oi_4h_short_reversal(row: dict[str, Any]) -> bool:
 
 def pattern_high_neg_funding_12h_short(row: dict[str, Any]) -> bool:
     return (
-        number(row.get("funding_rate")) <= -0.001
+        number(row.get("funding_rate")) <= -0.0003
         and number(row.get("price_position_24h")) >= HIGH_POSITION_THRESHOLD
-        and number(row.get("quote_volume_24h")) >= 30_000_000
+        and number(row.get("price_change_24h")) >= 10
         and number(row.get("price_change_1h")) > CHASE_DOWN_1H_LIMIT
     )
 
@@ -522,18 +770,35 @@ def pattern_short_crowd_high_volume_12h_short(row: dict[str, Any]) -> bool:
     )
 
 
-def pattern_strict_momentum_4h_long(row: dict[str, Any]) -> bool:
+def pattern_oi_4h_long_reversal(row: dict[str, Any]) -> bool:
+    """24h低位叠加OI异常后的4小时反向做多观察模式。"""
     tag = str(row.get("anomaly_tag") or "")
-    position = number(row.get("price_position_24h"))
+    has_oi_tag = "OI异常增加" in tag or "OI寮傚父澧炲姞" in tag
+    has_oi_pressure = has_oi_tag or number(row.get("oi_change_1h")) >= 5
+    return (
+        has_oi_pressure
+        and number(row.get("price_position_24h")) <= LOW_POSITION_THRESHOLD
+        and number(row.get("price_change_1h")) < CHASE_UP_1H_LIMIT
+        and "空头拥挤、杠杆过热" not in tag
+    )
+
+
+def pattern_low_pos_funding_12h_long(row: dict[str, Any]) -> bool:
+    return (
+        number(row.get("funding_rate")) >= 0.001
+        and number(row.get("price_position_24h")) <= LOW_POSITION_THRESHOLD
+        and number(row.get("quote_volume_24h")) >= 30_000_000
+        and number(row.get("price_change_1h")) < CHASE_UP_1H_LIMIT
+    )
+
+
+def pattern_long_crowd_low_volume_12h_long(row: dict[str, Any]) -> bool:
+    tag = str(row.get("anomaly_tag") or "")
     return (
         "多头拥挤" in tag
-        and "杠杆过热" in tag
-        and str(row.get("market_regime") or "") != "weak"
-        and 45 <= position <= 90
-        and number(row.get("price_change_1h")) >= 0
-        and number(row.get("price_change_4h")) >= 2
-        and number(row.get("price_change_24h")) >= 0
-        and number(row.get("quote_volume_change_24h")) >= 25
+        and number(row.get("price_position_24h")) <= LOW_POSITION_THRESHOLD
+        and number(row.get("quote_volume_change_24h")) >= 100
+        and number(row.get("price_change_1h")) < CHASE_UP_1H_LIMIT
     )
 
 
@@ -557,10 +822,23 @@ def pattern_score(row: dict[str, Any], pattern_key: str) -> int:
         score += min(number(row.get("quote_volume_change_24h")) / 100 * 10, 25)
         score += context_score(row, pattern_key)
         return min(max(int(score), 0), 100)
-    if pattern_key == "strict_momentum_4h_long":
+    if pattern_key == "oi_4h_long_reversal":
         score = 50
-        score += min(number(row.get("price_change_4h")) * 2, 20)
-        score += min(number(row.get("quote_volume_change_24h")) / 100 * 8, 16)
+        if "OI异常增加" in str(row.get("anomaly_tag") or ""):
+            score += 12
+        score += min(number(row.get("oi_change_1h")) * 2, 24)
+        if number(row.get("risk_score")) >= 70:
+            score += 12
+        score += context_score(row, pattern_key)
+        return min(max(int(score), 0), 100)
+    if pattern_key == "low_pos_funding_12h_long":
+        score = 55
+        score += min(abs(number(row.get("funding_rate"))) / 0.001 * 10, 20)
+        score += context_score(row, pattern_key)
+        return min(max(int(score), 0), 100)
+    if pattern_key == "long_crowd_low_volume_12h_long":
+        score = 55
+        score += min(number(row.get("quote_volume_change_24h")) / 100 * 10, 25)
         score += context_score(row, pattern_key)
         return min(max(int(score), 0), 100)
     return min(max(int(50 + context_score(row, pattern_key)), 0), 100)
@@ -600,28 +878,39 @@ def context_score(row: dict[str, Any], pattern_key: str) -> int:
             score -= 25
         return score
 
-    score = 0
-    if pattern_key == "strict_momentum_4h_long":
-        if str(row.get("market_regime") or "") == "strong":
-            score += 15
-        if str(row.get("market_regime") or "") == "weak":
-            score -= 35
-        if number(row.get("price_change_1h")) >= 0:
+    if pattern_key in {
+        "oi_4h_long_reversal",
+        "low_pos_funding_12h_long",
+        "long_crowd_low_volume_12h_long",
+    }:
+        score = 0
+        if number(row.get("price_change_1h")) <= -2:
             score += 6
-        if number(row.get("price_change_4h")) >= 2:
+        if number(row.get("price_position_24h")) <= 20:
+            score += 12
+        if number(row.get("price_change_24h")) <= -20:
             score += 10
-        if 45 <= number(row.get("price_position_24h")) <= 90:
-            score += 10
+        if number(row.get("funding_same_sign_count")) >= 4 and number(row.get("funding_rate")) < 0:
+            score += 4
         if number(row.get("quote_volume_change_24h")) >= 100:
-            score += 8
+            score += 10
         elif number(row.get("quote_volume_change_24h")) >= 25:
             score += 4
-        if number(row.get("price_change_1h")) >= 8:
-            score -= 12
-        if number(row.get("price_position_24h")) > 95:
+        if str(row.get("market_regime") or "") == "strong":
+            score += 8
+        if str(row.get("market_regime") or "") == "weak":
             score -= 20
+        if number(row.get("price_change_1h")) >= 2:
+            score -= 5
+        if number(row.get("price_change_1h")) >= CHASE_UP_1H_LIMIT:
+            score -= 20
+        if number(row.get("price_position_24h")) >= 80:
+            score -= 30
+        if pattern_key == "oi_4h_long_reversal" and "空头拥挤、杠杆过热" in str(row.get("anomaly_tag") or ""):
+            score -= 25
         return score
 
+    score = 0
     if number(row.get("price_change_4h")) >= 0:
         score += 5
     if number(row.get("price_change_24h")) >= 0:
@@ -635,25 +924,63 @@ def context_score(row: dict[str, Any], pattern_key: str) -> int:
     return score
 
 
-def build_short_trade_plan(row: dict[str, Any], max_hold_hours: int = SHORT_MAX_HOLD_HOURS) -> dict[str, Any]:
-    """Return a simple 4h short plan for OI reversal candidates."""
+def build_short_trade_plan(row: dict[str, Any], pattern_key: str | None = None) -> dict[str, Any]:
+    """Return the backtest-calibrated short plan for the matched pattern."""
     price = number(row.get("price"))
     reasons = short_setup_reasons(row)
+    plan = dict(SHORT_TRADE_PLANS.get(
+        pattern_key or "",
+        {
+            "stop_loss_pct": SHORT_STOP_LOSS_PCT,
+            "first_take_profit_pct": SHORT_FIRST_TAKE_PROFIT_PCT,
+            "final_take_profit_pct": SHORT_FINAL_TAKE_PROFIT_PCT,
+            "max_hold_hours": SHORT_MAX_HOLD_HOURS,
+        },
+    ))
+    # The new confirmation layer has wider adverse excursions than the old
+    # B/C population, so use tier-specific stops while keeping the targets.
+    if pattern_key in {"high_neg_funding_12h_short", "short_crowd_high_volume_12h_short"}:
+        tier = short_confirmation_tier(row)
+        if tier in {"premium_volume", "volume_confirmation"}:
+            plan["stop_loss_pct"] = 10.0
+        elif tier == "crowd_funding_confirmation":
+            plan["stop_loss_pct"] = 8.0
+    stop_loss_pct = plan["stop_loss_pct"]
+    first_take_profit_pct = plan["first_take_profit_pct"]
+    final_take_profit_pct = plan["final_take_profit_pct"]
+    max_hold_hours = int(plan["max_hold_hours"])
     return {
         "entry_side": "SHORT",
         "entry_price": price,
-        "stop_loss_pct": SHORT_STOP_LOSS_PCT,
-        "stop_loss_price": round(price * (1 + SHORT_STOP_LOSS_PCT / 100), 10) if price else None,
-        "first_take_profit_pct": SHORT_FIRST_TAKE_PROFIT_PCT,
-        "first_take_profit_price": round(price * (1 - SHORT_FIRST_TAKE_PROFIT_PCT / 100), 10) if price else None,
-        "final_take_profit_pct": SHORT_FINAL_TAKE_PROFIT_PCT,
-        "final_take_profit_price": round(price * (1 - SHORT_FINAL_TAKE_PROFIT_PCT / 100), 10) if price else None,
+        "stop_loss_pct": stop_loss_pct,
+        "stop_loss_price": round(price * (1 + stop_loss_pct / 100), 10) if price else None,
+        "first_take_profit_pct": first_take_profit_pct,
+        "first_take_profit_price": round(price * (1 - first_take_profit_pct / 100), 10) if price else None,
+        "final_take_profit_pct": final_take_profit_pct,
+        "final_take_profit_price": round(price * (1 - final_take_profit_pct / 100), 10) if price else None,
         "max_hold_hours": max_hold_hours,
         "time_exit_rule": f"{max_hold_hours}小时后仍未明显盈利则平仓或减仓",
         "position_rule": "第一止盈先平一半，剩余仓位移动止损到开仓价附近",
         "short_setup_score": short_setup_score(row),
         "short_setup_reasons": "；".join(reasons),
     }
+
+
+def short_stop_loss_pct(row: dict[str, Any], max_hold_hours: int) -> float:
+    """Use wider stops for 12h high-volatility short setups."""
+    if max_hold_hours >= 12:
+        if number(row.get("price_change_24h")) >= 20 or number(row.get("quote_volume_change_24h")) >= 100:
+            return 12.0
+        return 10.0
+    return SHORT_STOP_LOSS_PCT
+
+
+def short_first_take_profit_pct(max_hold_hours: int) -> float:
+    return 5.0 if max_hold_hours >= 12 else SHORT_FIRST_TAKE_PROFIT_PCT
+
+
+def short_final_take_profit_pct(max_hold_hours: int) -> float:
+    return 10.0 if max_hold_hours >= 12 else SHORT_FINAL_TAKE_PROFIT_PCT
 
 
 def build_long_trade_plan(row: dict[str, Any], max_hold_hours: int = LONG_MAX_HOLD_HOURS) -> dict[str, Any]:
@@ -712,24 +1039,37 @@ def short_setup_score(row: dict[str, Any]) -> int:
 
 def long_setup_score(row: dict[str, Any]) -> int:
     score = 0
-    if "多头拥挤" in str(row.get("anomaly_tag") or ""):
+    tag = str(row.get("anomaly_tag") or "")
+    if "OI异常增加" in tag or "OI寮傚父澧炲姞" in tag:
+        score += 25
+    if number(row.get("oi_change_1h")) >= 5:
         score += 20
-    if "杠杆过热" in str(row.get("anomaly_tag") or ""):
-        score += 15
-    if str(row.get("market_regime") or "") == "strong":
+    if number(row.get("risk_score")) >= 70:
         score += 20
-    if str(row.get("market_regime") or "") == "weak":
-        score -= 35
-    if number(row.get("price_change_4h")) >= 2:
+    if number(row.get("price_position_24h")) <= 26:
+        score += 12
+    if number(row.get("price_change_24h")) <= -20:
         score += 15
-    if 45 <= number(row.get("price_position_24h")) <= 90:
-        score += 15
-    if number(row.get("quote_volume_change_24h")) >= 25:
+    if number(row.get("quote_volume_change_24h")) >= 100:
+        score += 12
+    elif number(row.get("quote_volume_change_24h")) >= 25:
+        score += 8
+    if number(row.get("quote_volume_24h")) >= 30_000_000:
+        score += 8
+    if number(row.get("funding_rate")) >= 0.001:
         score += 10
-    if number(row.get("price_change_1h")) >= 8:
-        score -= 15
-    if number(row.get("price_position_24h")) > 95:
+    elif number(row.get("funding_rate")) < 0:
+        score += 5
+    if str(row.get("market_regime") or "") == "strong":
+        score += 10
+    if str(row.get("market_regime") or "") == "weak":
         score -= 25
+    if number(row.get("price_change_1h")) >= 3:
+        score -= 20
+    if number(row.get("price_position_24h")) >= 80:
+        score -= 40
+    if "空头拥挤、杠杆过热" in tag:
+        score -= 15
     return max(0, min(score, 100))
 
 
@@ -770,23 +1110,35 @@ def short_setup_reasons(row: dict[str, Any]) -> list[str]:
 def long_setup_reasons(row: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     tag = str(row.get("anomaly_tag") or "")
-    if "多头拥挤" in tag:
-        reasons.append("标签含多头拥挤")
-    if "杠杆过热" in tag:
-        reasons.append("标签含杠杆过热")
-    if row.get("market_regime") == "strong":
-        reasons.append("市场横截面强")
-    if row.get("market_regime") == "weak":
-        reasons.append("弱市，多头降级")
-    if number(row.get("price_change_4h")) >= 2:
-        reasons.append(f"4h涨幅{number(row.get('price_change_4h')):+.2f}%")
-    if 45 <= number(row.get("price_position_24h")) <= 90:
-        reasons.append(f"24h位置{number(row.get('price_position_24h')):.1f}%")
+    if "OI异常增加" in tag or "OI寮傚父澧炲姞" in tag:
+        reasons.append("标签含OI异常增加")
+    if number(row.get("oi_change_1h")) >= 5:
+        reasons.append(f"1h OI增加{number(row.get('oi_change_1h')):.2f}%")
+    if number(row.get("risk_score")) >= 70:
+        reasons.append(f"风险评分{int(number(row.get('risk_score')))}")
+    if number(row.get("price_position_24h")) <= 26:
+        reasons.append(f"24h价格位置{number(row.get('price_position_24h')):.1f}%")
+    if number(row.get("price_change_24h")) <= -20:
+        reasons.append(f"24h跌幅{number(row.get('price_change_24h')):+.2f}%")
     if number(row.get("quote_volume_change_24h")) >= 25:
         reasons.append(f"24h成交额变化{number(row.get('quote_volume_change_24h')):+.1f}%")
-    if number(row.get("price_change_1h")) >= 8:
-        reasons.append("1h涨幅过大，谨慎追多")
-    return reasons or ["强势延续观察"]
+    if number(row.get("quote_volume_24h")) >= 30_000_000:
+        reasons.append("24h成交额超过3000万")
+    if number(row.get("funding_rate")) >= 0.001:
+        reasons.append(f"Funding显著为正{number(row.get('funding_rate')) * 100:+.4f}%")
+    elif number(row.get("funding_rate")) < 0:
+        reasons.append(f"Funding为负{number(row.get('funding_rate')) * 100:+.4f}%")
+    if row.get("market_regime") == "strong":
+        reasons.append("市场横截面偏强")
+    if row.get("market_regime") == "weak":
+        reasons.append("弱市环境，机械做多降级")
+    if number(row.get("price_change_1h")) >= 3:
+        reasons.append("1h已大涨，谨慎追多")
+    if number(row.get("price_position_24h")) >= 80:
+        reasons.append("24h高位，禁止高位追多")
+    if "空头拥挤、杠杆过热" in tag:
+        reasons.append("弱势拥挤样本，禁止机械做多")
+    return reasons or ["OI异常增加反向多观察"]
 
 
 def summarize_returns(values: list[float | None]) -> dict[str, Any]:
@@ -941,3 +1293,15 @@ def number(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def text_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return "；".join(str(item) for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)

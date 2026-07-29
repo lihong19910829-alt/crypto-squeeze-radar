@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from config import SQLITE_DB_FILE
@@ -22,6 +22,17 @@ def enrich_market_context(items: list[dict[str, Any]]) -> None:
     if include_volume:
         fields += ", quote_volume_24h"
 
+    symbols = sorted({str(item.get("symbol") or "") for item in items if item.get("symbol")})
+    if not symbols:
+        for item in items:
+            _apply_empty_context(item)
+        return
+
+    # Context only needs the prior 24h observation plus a little safety margin.
+    # Restricting this to the current scan pool also avoids reading the full,
+    # ever-growing history table on every hourly run.
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat()
+    symbol_placeholders = ", ".join("?" for _ in symbols)
     by_symbol: dict[str, list[dict[str, Any]]] = {}
     with sqlite3.connect(SQLITE_DB_FILE) as conn:
         conn.row_factory = sqlite3.Row
@@ -29,10 +40,12 @@ def enrich_market_context(items: list[dict[str, Any]]) -> None:
             f"""
             SELECT {fields}
             FROM market_snapshots
-            WHERE symbol IS NOT NULL
+            WHERE symbol IN ({symbol_placeholders})
               AND price IS NOT NULL
+              AND timestamp_utc >= ?
             ORDER BY symbol, timestamp_utc
-            """
+            """,
+            [*symbols, cutoff],
         ):
             item = dict(row)
             item["dt"] = parse_time(item["timestamp_utc"])

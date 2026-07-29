@@ -3,6 +3,8 @@ node_modules/
 __pycache__/
 **/__pycache__/
 *.pyc
+.env
+**/.env
 
 crypto-squeeze-radar/logs/
 crypto-squeeze-radar/storage/*.sqlite3

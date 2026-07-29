@@ -235,6 +235,20 @@ button {
   font-weight: 700;
 }
 
+.stop-advice {
+  display: block;
+  color: var(--red);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.stop-advice + small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -295,6 +309,67 @@ button {
 
 .pattern-table {
   min-width: 1180px;
+}
+
+.trade-plan-table {
+  min-width: 1060px;
+}
+
+.trade-plan-table td strong {
+  display: block;
+}
+
+.trade-plan-table td small {
+  display: block;
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+.star-badge {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.star-badge.on {
+  background: #fff4dd;
+  color: var(--amber);
+}
+
+.star-badge.off {
+  background: #eef2f7;
+  color: var(--muted);
+}
+
+.grade-chip {
+  display: inline-flex;
+  white-space: nowrap;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.grade-chip.trade {
+  background: #e8f7ef;
+  color: var(--green);
+}
+
+.grade-chip.small {
+  background: #fff4dd;
+  color: var(--amber);
+}
+
+.grade-chip.watch {
+  background: #eef2f7;
+  color: var(--muted);
+}
+
+.short-price {
+  color: var(--red);
 }
 
 .pattern-summary-row td {
@@ -667,4 +742,22 @@ td small,
   .motion-copy h2 {
     font-size: 18px;
   }
+}
+
+.topbar {
+  order: -4;
+}
+
+#patterns {
+  order: -3;
+}
+
+#overview {
+  order: -2;
+}
+
+.motion-panel,
+#opportunity,
+#tweets {
+  display: none !important;
 }

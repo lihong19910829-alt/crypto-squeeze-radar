@@ -1,6 +1,6 @@
 param(
-  [int]$MinIntervalHours = 1,
-  [int]$TargetSecond = -1,
+  [int]$MinIntervalHours = 4,
+  [int]$MinIntervalGraceMinutes = 2,
   [switch]$Force
 )
 
@@ -8,8 +8,8 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $logDir = Join-Path $projectRoot "logs"
-$logFile = Join-Path $logDir "hourly_runner.log"
-$lastSuccessFile = Join-Path $logDir "last_successful_update.txt"
+$logFile = Join-Path $logDir "full_scan_runner.log"
+$lastSuccessFile = Join-Path $logDir "last_successful_full_scan.txt"
 $lockFile = Join-Path $logDir "radar_pipeline.lock"
 
 if (-not (Test-Path $logDir)) {
@@ -17,13 +17,6 @@ if (-not (Test-Path $logDir)) {
 }
 
 Set-Location $projectRoot
-
-if ($TargetSecond -ge 0 -and $TargetSecond -lt 60) {
-  $nowForDelay = Get-Date
-  if ($nowForDelay.Second -lt $TargetSecond) {
-    Start-Sleep -Seconds ($TargetSecond - $nowForDelay.Second)
-  }
-}
 
 $envFile = Join-Path $projectRoot ".env"
 if (Test-Path $envFile) {
@@ -53,18 +46,18 @@ function Write-RunnerLog {
 }
 
 function Acquire-RunnerLock {
-  param([int]$StaleAfterMinutes = 45)
+  param([int]$StaleAfterMinutes = 180)
   if (Test-Path $lockFile) {
     $lock = Get-Item $lockFile
     if ($lock.LastWriteTime -lt (Get-Date).AddMinutes(-$StaleAfterMinutes)) {
       Remove-Item -LiteralPath $lockFile -Force
     }
     else {
-      Write-RunnerLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")] Skip update: another radar task is still running ($lockFile)"
+      Write-RunnerLog "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")] Skip full scan: another radar task is still running ($lockFile)"
       exit 0
     }
   }
-  "$PID hourly $(Get-Date -Format o)" | Set-Content -Path $lockFile -Encoding UTF8
+  "$PID full_scan $(Get-Date -Format o)" | Set-Content -Path $lockFile -Encoding UTF8
 }
 
 function Release-RunnerLock {
@@ -117,43 +110,40 @@ if (-not $Force -and $MinIntervalHours -gt 0 -and (Test-Path $lastSuccessFile)) 
   $lastRun = [DateTime]::Parse($lastText.Trim())
   $nextRun = $lastRun.AddHours($MinIntervalHours)
   $currentRun = Get-Date
-  $sameHourBucket = $lastRun.ToString("yyyy-MM-dd HH") -eq $currentRun.ToString("yyyy-MM-dd HH")
-  if ($sameHourBucket -and $currentRun -lt $nextRun) {
-    Write-RunnerLog "[$timestamp] Skip update: last successful run was $lastRun in the same hour; next allowed after $nextRun"
+  $effectiveNextRun = $nextRun.AddMinutes(-[Math]::Max(0, $MinIntervalGraceMinutes))
+  if ($currentRun -lt $effectiveNextRun) {
+    Write-RunnerLog "[$timestamp] Skip full scan: last successful run was $lastRun; next allowed after $nextRun"
     exit 0
   }
 }
 
 $env:PYTHONUNBUFFERED = "1"
+$env:RADAR_SCAN_MODE = "full_scan"
 if (-not $env:BINANCE_MAX_WORKERS) {
   $env:BINANCE_MAX_WORKERS = "12"
 }
 if (-not $env:MAX_BINANCE_SYMBOLS) {
   $env:MAX_BINANCE_SYMBOLS = "0"
 }
-if (-not $env:PATTERN_PUSH_ENABLED -and $env:PUSHPLUS_TOKEN) {
-  $env:PATTERN_PUSH_ENABLED = "true"
-}
 
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-Write-RunnerLog "[$timestamp] Start scheduled update"
-Write-RunnerLog "[$timestamp] MAX_BINANCE_SYMBOLS=$env:MAX_BINANCE_SYMBOLS BINANCE_MAX_WORKERS=$env:BINANCE_MAX_WORKERS RADAR_SCAN_MODE=signal_scan PATTERN_PUSH_ENABLED=$env:PATTERN_PUSH_ENABLED TRADING_AUTO_EXECUTE=$env:TRADING_AUTO_EXECUTE TRADING_ENABLED=$env:TRADING_ENABLED TRADING_DRY_RUN=$env:TRADING_DRY_RUN"
+Write-RunnerLog "[$timestamp] Start full-market deep OI scan"
+Write-RunnerLog "[$timestamp] MAX_BINANCE_SYMBOLS=$env:MAX_BINANCE_SYMBOLS BINANCE_MAX_WORKERS=$env:BINANCE_MAX_WORKERS RADAR_SCAN_MODE=$env:RADAR_SCAN_MODE"
 
 try {
   Acquire-RunnerLock
-  $env:RADAR_SCAN_MODE = "signal_scan"
-  & $pythonCommand.File @($pythonCommand.Args) -u run_once.py 2>&1 | ForEach-Object { Write-RunnerLog "$_" }
+  & $pythonCommand.File @($pythonCommand.Args) -u run_full_scan_once.py 2>&1 | ForEach-Object { Write-RunnerLog "$_" }
   $exitCode = $LASTEXITCODE
   if ($exitCode -ne 0) {
-    throw "python run_once.py failed with exit code: $exitCode"
+    throw "python run_full_scan_once.py failed with exit code: $exitCode"
   }
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
   (Get-Date).ToString("o") | Set-Content -Path $lastSuccessFile -Encoding UTF8
-  Write-RunnerLog "[$timestamp] Scheduled update finished"
+  Write-RunnerLog "[$timestamp] Full-market deep OI scan finished"
 }
 catch {
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-  Write-RunnerLog "[$timestamp] Scheduled update failed: $_"
+  Write-RunnerLog "[$timestamp] Full-market deep OI scan failed: $_"
   throw
 }
 finally {

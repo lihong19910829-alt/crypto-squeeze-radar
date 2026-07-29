@@ -155,29 +155,24 @@
           <div class="panel-head">
             <div>
               <h2>OI 模式监控</h2>
-              <p>只保留高质量方向：三类做空结构和一类强势延续做多。</p>
+              <p>按复盘后的空头模式展示交易计划；后台保留评分与样本统计，前端只呈现执行字段。</p>
             </div>
           </div>
           <div class="pattern-grid">
             <article class="pattern-box">
               <h3>高位 OI 异常 4H 空</h3>
-              <p>高位、OI 快速堆积，不追已经大跌的币。</p>
-              <div class="table-wrap"><table class="pattern-table"><thead><tr><th>#</th><th>币种</th><th>方向</th><th>分数</th><th>OI 1h</th><th>价1h</th><th>24h位置</th><th>资金费</th><th>样本</th><th>概率</th><th>中位</th></tr></thead><tbody id="patternOiShortRows"></tbody></table></div>
+              <p>4% 止损；3% / 7% 止盈；标星或高分优先。</p>
+              <div class="table-wrap"><table class="pattern-table trade-plan-table"><thead><tr><th>#</th><th>星</th><th>品种</th><th>级别</th><th>仓位</th><th>入场</th><th>止损</th><th>第一止盈</th><th>最终止盈</th><th>持仓</th><th>执行</th></tr></thead><tbody id="patternOiShortRows"></tbody></table></div>
             </article>
             <article class="pattern-box">
               <h3>高位负 Funding 12H 空</h3>
-              <p>高位、负资金费、成交额足，偏弱币延续。</p>
-              <div class="table-wrap"><table class="pattern-table"><thead><tr><th>#</th><th>币种</th><th>方向</th><th>分数</th><th>OI 1h</th><th>价1h</th><th>24h位置</th><th>资金费</th><th>样本</th><th>概率</th><th>中位</th></tr></thead><tbody id="patternNegFundingRows"></tbody></table></div>
+              <p>6% 止损；8% / 13% 止盈；只做标星或小仓确认。</p>
+              <div class="table-wrap"><table class="pattern-table trade-plan-table"><thead><tr><th>#</th><th>星</th><th>品种</th><th>级别</th><th>仓位</th><th>入场</th><th>止损</th><th>第一止盈</th><th>最终止盈</th><th>持仓</th><th>执行</th></tr></thead><tbody id="patternNegFundingRows"></tbody></table></div>
             </article>
             <article class="pattern-box">
               <h3>空头拥挤高位放量 12H 空</h3>
-              <p>高位放量后，优先观察回落。</p>
-              <div class="table-wrap"><table class="pattern-table"><thead><tr><th>#</th><th>币种</th><th>方向</th><th>分数</th><th>OI 1h</th><th>价1h</th><th>24h位置</th><th>资金费</th><th>样本</th><th>概率</th><th>中位</th></tr></thead><tbody id="patternShortCrowdRows"></tbody></table></div>
-            </article>
-            <article class="pattern-box">
-              <h3>强势延续 4H 多</h3>
-              <p>只在非弱市、趋势延续时出现。</p>
-              <div class="table-wrap"><table class="pattern-table"><thead><tr><th>#</th><th>币种</th><th>方向</th><th>分数</th><th>OI 1h</th><th>价1h</th><th>24h位置</th><th>资金费</th><th>样本</th><th>概率</th><th>中位</th></tr></thead><tbody id="patternLongRows"></tbody></table></div>
+              <p>高位 + 空头拥挤 + 放量；标星为主交易。</p>
+              <div class="table-wrap"><table class="pattern-table trade-plan-table"><thead><tr><th>#</th><th>星</th><th>品种</th><th>级别</th><th>仓位</th><th>入场</th><th>止损</th><th>第一止盈</th><th>最终止盈</th><th>持仓</th><th>执行</th></tr></thead><tbody id="patternShortCrowdRows"></tbody></table></div>
             </article>
           </div>
         </section>

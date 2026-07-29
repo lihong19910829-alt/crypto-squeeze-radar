@@ -11,7 +11,8 @@ from pathlib import Path
 
 import export_dashboard_data
 import main as radar_main
-from config import BASE_DIR
+from config import BASE_DIR, TRADING_AUTO_EXECUTE
+from trading.executor import run_trading_cycle
 
 
 WEB_FILES = [
@@ -29,19 +30,37 @@ def main() -> None:
     print(f"[{now()}] 开始 Crypto Squeeze Radar 更新")
 
     # 第一步：抓取市场数据，并写入 CSV、SQLite、报告、推文草稿。
-    radar_main.main()
+    _, pattern_payload = radar_main.main(
+        scan_mode="signal_scan",
+        emit_outputs=True,
+        return_pattern_payload=True,
+    )
 
     # 第二步：把 SQLite 和输出文件导出成静态网页可读的 web/data.js。
     export_dashboard_data.main()
 
-    # 第三步：同步到 Vercel 实际部署目录，保证下次部署包含最新 data.js 和静态资产。
+    # 第三步：可选运行独立交易层。默认关闭，避免普通监控任务触发真实交易。
+    if TRADING_AUTO_EXECUTE:
+        summary = run_trading_cycle(payload=pattern_payload)
+        print(
+            f"[{now()}] 交易层完成：信号 {summary['signals_seen']}，"
+            f"提交/计划 {summary['submitted']}，跳过 {summary['skipped']}，错误 {summary['errors']}"
+        )
+        print(
+            f"[{now()}] 交易层审计：来源 {summary['source']}，"
+            f"候选 {summary['candidate_signals']}，过滤 {summary['filtered_reasons']}"
+        )
+    else:
+        print(f"[{now()}] 已跳过交易层：TRADING_AUTO_EXECUTE=false")
+
+    # 第四步：同步到 Vercel 实际部署目录，保证下次部署包含最新 data.js 和静态资产。
     sync_vercel_site()
 
-    # 第四步：默认不自动部署；只有显式打开 AUTO_DEPLOY_VERCEL=true 才发布线上版本。
-    if os.getenv("AUTO_DEPLOY_VERCEL", "false").lower() == "true":
-      deploy_to_vercel()
+    # 第五步：默认把每小时快照部署到 Vercel；可用 AUTO_DEPLOY_VERCEL=false 临时暂停。
+    if should_auto_deploy():
+        deploy_to_vercel()
     else:
-      print(f"[{now()}] 已跳过自动部署。需要线上同步时设置 AUTO_DEPLOY_VERCEL=true")
+        print(f"[{now()}] 已跳过自动部署。需要线上同步时设置 AUTO_DEPLOY_VERCEL=true 并配置 VERCEL_TOKEN")
 
     print(f"[{now()}] 本轮更新完成")
 
@@ -62,6 +81,14 @@ def sync_vercel_site() -> None:
             print(f"[{now()}] 跳过缺失文件：{source}")
 
 
+def should_auto_deploy() -> bool:
+    """判断本轮是否发布 Vercel 快照；有 token 时默认开启，可显式关闭。"""
+    value = os.getenv("AUTO_DEPLOY_VERCEL")
+    if value is None:
+        return bool(os.getenv("VERCEL_TOKEN"))
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
 def deploy_to_vercel() -> None:
     """调用现有部署脚本；计划任务场景要求提前设置 VERCEL_TOKEN，不能依赖交互输入。"""
     deploy_script = BASE_DIR / "deploy_vercel.ps1"
@@ -72,6 +99,7 @@ def deploy_to_vercel() -> None:
         raise RuntimeError("AUTO_DEPLOY_VERCEL=true 时必须先设置 VERCEL_TOKEN 环境变量")
 
     print(f"[{now()}] 开始自动部署到 Vercel")
+    deploy_timeout = int(os.getenv("VERCEL_DEPLOY_TIMEOUT_SECONDS", "180"))
     try:
         subprocess.run(
             [
@@ -84,7 +112,7 @@ def deploy_to_vercel() -> None:
             ],
             cwd=BASE_DIR,
             check=True,
-            timeout=75,
+            timeout=deploy_timeout,
         )
     except subprocess.TimeoutExpired:
         print(f"[{now()}] Vercel CLI 超时未退出；部署可能已提交，任务继续结束以免阻塞下一小时")

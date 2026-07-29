@@ -147,16 +147,27 @@ class BinanceFuturesClient:
         price_change_24h_pct = _to_float(ticker_24h_data.get("priceChangePercent"))
         quote_volume_24h = _to_float(ticker_24h_data.get("quoteVolume"))
         price_position_24h_pct = _price_position(price, low_24h, high_24h)
-        open_interest = self.get_open_interest(symbol)
-
+        # The latest OI history row already contains the current aggregate OI
+        # and the values used for the 1h/24h changes. Reusing it removes one
+        # REST request per symbol without changing the push-facing OI changes.
+        open_interest = None
         oi_change_1h_pct, oi_change_24h_pct, oi_value_usd = None, None, None
         try:
             hourly = self.get_open_interest_history(symbol, "1h", 25)
+            open_interest = _latest_open_interest(hourly)
             oi_change_1h_pct = _pct_change_from_history(hourly, 1)
             oi_change_24h_pct = _pct_change_from_history(hourly, 24)
             oi_value_usd = _latest_oi_value(hourly)
         except RuntimeError as exc:
             warnings.append(f"OI 历史暂不可用: {exc}")
+
+        # Keep a degraded fallback for symbols whose history endpoint is
+        # temporarily unavailable or returns an incomplete latest row.
+        if open_interest is None:
+            try:
+                open_interest = self.get_open_interest(symbol)
+            except RuntimeError as exc:
+                warnings.append(f"当前 OI 暂不可用: {exc}")
 
         long_liq, short_liq = 0.0, 0.0
         if fetch_liquidations:
@@ -217,6 +228,13 @@ def _pct_change_from_history(rows: list[dict[str, Any]], periods_back: int) -> f
     if latest is None or previous in (None, 0):
         return None
     return (latest - previous) / previous * 100
+
+
+def _latest_open_interest(rows: list[dict[str, Any]]) -> float | None:
+    """Read the latest aggregate OI from the history response."""
+    if not rows:
+        return None
+    return _to_float(rows[-1].get("sumOpenInterest"))
 
 
 def _latest_oi_value(rows: list[dict[str, Any]]) -> float | None:

@@ -1,0 +1,49 @@
+# Project State
+
+## 2026-07-22 阶段 0：IO/OI 策略范围定位
+
+- 任务名称：IO/OI 做空逻辑、旧做多逻辑、微信推送与前端展示入口定位
+- 当前阶段：阶段 0，读取项目状态并限定范围
+- 已定位文件：
+  - `README.md`
+  - `crypto-squeeze-radar/README.md`
+  - `crypto-squeeze-radar/config.py`
+  - `crypto-squeeze-radar/HOURLY_UPDATER.md`
+  - `crypto-squeeze-radar/main.py`
+  - `crypto-squeeze-radar/run_once.py`
+  - `crypto-squeeze-radar/run_hourly_once.ps1`
+  - `crypto-squeeze-radar/install_windows_task.ps1`
+  - `crypto-squeeze-radar/indicators/oi.py`
+  - `crypto-squeeze-radar/indicators/scoring.py`
+  - `crypto-squeeze-radar/patterns/oi_pattern_monitor.py`
+  - `crypto-squeeze-radar/output/pattern_push.py`
+  - `crypto-squeeze-radar/export_dashboard_data.py`
+  - `crypto-squeeze-radar/web/index.html`
+  - `crypto-squeeze-radar/web/app.js`
+- 待修改文件：
+  - `crypto-squeeze-radar/patterns/oi_pattern_monitor.py`
+  - `crypto-squeeze-radar/output/pattern_push.py`
+  - `crypto-squeeze-radar/web/index.html`
+  - `crypto-squeeze-radar/web/app.js`
+  - `crypto-squeeze-radar/export_dashboard_data.py`
+  - `crypto-squeeze-radar/config.py`（仅当下一阶段需要新增或调整阈值/开关）
+  - `vercel-site/index.html`、`vercel-site/app.js`（仅当不通过同步流程更新发布目录时才直接改）
+- 已完成事项：
+  - 检查 Git 工作区状态，当前无未提交改动。
+  - 确认根目录原先不存在 `PROJECT_STATE.md`，本次仅新增该状态记录文件。
+  - 按限定范围读取 README、配置、调度、微信推送、策略与前端展示相关文件。
+  - 定位 IO/OI 做空逻辑入口：`crypto-squeeze-radar/patterns/oi_pattern_monitor.py` 中 `PATTERNS["oi_4h_short_reversal"]`、`detect_current_signals()`、`pattern_oi_4h_short_reversal()`、`build_short_trade_plan()`。
+  - 定位旧做多逻辑入口：`crypto-squeeze-radar/patterns/oi_pattern_monitor.py` 中 `PATTERNS["strict_momentum_4h_long"]`、`pattern_strict_momentum_4h_long()`、`build_long_trade_plan()`。
+  - 定位微信推送入口：`crypto-squeeze-radar/main.py` 调用 `push_pattern_signals()`；实现位于 `crypto-squeeze-radar/output/pattern_push.py`。
+  - 定位信号展示栏目：`crypto-squeeze-radar/web/index.html` 的 `#patterns`、`#signals`、`#opportunity`；渲染位于 `crypto-squeeze-radar/web/app.js` 的 `renderPatterns()`、`renderSignals()`、`renderOpportunityScanner()`。
+  - 定位调度入口：`crypto-squeeze-radar/run_hourly_once.ps1` 调用 `python -u run_once.py`，`run_once.py` 依次执行主扫描、导出前端数据、同步 `vercel-site`。
+- 测试结果：
+  - 已执行 `git status --short`，输出为空，工作区干净。
+  - 阶段 0 未运行策略任务或前端构建，未修改业务代码。
+- 未解决问题：
+  - README 与部分源码注释/字符串在终端显示为乱码，需要下一阶段谨慎保持文件编码，不做无关重写。
+  - 尚未确定下一阶段是否直接更新 `vercel-site`，还是只改 `crypto-squeeze-radar/web` 后通过同步流程生成。
+- 下一步：
+  - 在进入阶段 1 前，先确认目标行为：IO/OI 做空逻辑要替换、增强还是只调整展示与推送优先级。
+  - 按最小范围修改策略源文件、推送格式和前端展示源文件。
+  - 修改后运行轻量校验，并在需要时导出静态前端数据。

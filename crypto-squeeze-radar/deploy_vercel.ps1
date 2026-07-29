@@ -34,11 +34,14 @@ Write-Host "Vercel scope: $Scope"
 
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
+$previousVercelToken = $env:VERCEL_TOKEN
+$env:VERCEL_TOKEN = $Token
 try {
-  $deployOutput = & $vercelCmd deploy $siteDir --prod --yes --no-wait --no-color --scope $Scope --token="$Token" 2>&1
+  $deployOutput = & $vercelCmd deploy $siteDir --prod --yes --no-wait --no-color --scope $Scope 2>&1
   $exitCode = $LASTEXITCODE
 }
 finally {
+  $env:VERCEL_TOKEN = $previousVercelToken
   $ErrorActionPreference = $previousErrorActionPreference
 }
 

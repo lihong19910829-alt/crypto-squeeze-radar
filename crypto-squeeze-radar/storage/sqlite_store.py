@@ -41,6 +41,8 @@ def init_db(db_file: Path = SQLITE_DB_FILE) -> None:
                 risk_score INTEGER,
                 anomaly_tag TEXT,
                 source TEXT,
+                scan_mode TEXT,
+                universe_reason TEXT,
                 created_at_utc TEXT NOT NULL
             )
             """
@@ -59,6 +61,8 @@ def init_db(db_file: Path = SQLITE_DB_FILE) -> None:
                 "quote_volume_change_24h": "REAL",
                 "funding_same_sign_count": "INTEGER",
                 "funding_avg_abs_6": "REAL",
+                "scan_mode": "TEXT",
+                "universe_reason": "TEXT",
             },
         )
         conn.execute(
@@ -75,7 +79,11 @@ def init_db(db_file: Path = SQLITE_DB_FILE) -> None:
         )
 
 
-def save_market_snapshots(items: list[dict[str, Any]], db_file: Path = SQLITE_DB_FILE) -> None:
+def save_market_snapshots(
+    items: list[dict[str, Any]],
+    db_file: Path = SQLITE_DB_FILE,
+    scan_mode: str = "signal_scan",
+) -> None:
     """把本轮每个币种的监控结果写入 SQLite。"""
     init_db(db_file)
     timestamp_utc = datetime.now(timezone.utc).isoformat()
@@ -110,6 +118,8 @@ def save_market_snapshots(items: list[dict[str, Any]], db_file: Path = SQLITE_DB
                 item.get("risk_score"),
                 "、".join(item.get("tags", [])),
                 item.get("source"),
+                item.get("scan_mode") or scan_mode,
+                item.get("universe_reason"),
                 timestamp_utc,
             )
         )
@@ -141,9 +151,11 @@ def save_market_snapshots(items: list[dict[str, Any]], db_file: Path = SQLITE_DB
                 risk_score,
                 anomaly_tag,
                 source,
+                scan_mode,
+                universe_reason,
                 created_at_utc
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
