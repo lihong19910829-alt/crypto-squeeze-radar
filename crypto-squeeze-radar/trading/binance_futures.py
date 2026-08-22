@@ -99,6 +99,50 @@ class BinanceFuturesTradingClient:
             params["origClientOrderId"] = client_order_id
         return self._request("GET", "/fapi/v1/order", params, signed=True)
 
+    def user_trades(
+        self,
+        symbol: str,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+        from_id: int | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Read account fills. This endpoint never creates or changes an order."""
+        return self._request(
+            "GET",
+            "/fapi/v1/userTrades",
+            {
+                "symbol": symbol,
+                "startTime": start_time_ms,
+                "endTime": end_time_ms,
+                "fromId": from_id,
+                "limit": limit,
+            },
+            signed=True,
+        )
+
+    def income_history(
+        self,
+        income_type: str,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+        page: int = 1,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Read realized PnL, commission, or funding income history."""
+        return self._request(
+            "GET",
+            "/fapi/v1/income",
+            {
+                "incomeType": income_type,
+                "startTime": start_time_ms,
+                "endTime": end_time_ms,
+                "page": page,
+                "limit": limit,
+            },
+            signed=True,
+        )
+
     def _sync_server_time(self) -> None:
         """Calibrate signed-request timestamps against Binance server time."""
         before = int(time.time() * 1000)

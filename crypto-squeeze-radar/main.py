@@ -37,7 +37,7 @@ from output.pattern_push import push_pattern_signals
 from output.report import save_report
 from output.tweets import save_tweets
 from output.x_publisher import publish_eligible_tweets
-from patterns.oi_pattern_monitor import run_pattern_monitor
+from patterns.oi_pattern_monitor import classify_market_regime_from_tickers, run_pattern_monitor
 from storage.sqlite_store import save_market_snapshots
 
 
@@ -62,6 +62,7 @@ def main(
     evaluated: list[dict[str, Any]] = []
     premium_map = get_premium_map(binance) if MONITOR_ALL_BINANCE_SYMBOLS else {}
     ticker_24h_map = get_24h_ticker_map(binance) if MONITOR_ALL_BINANCE_SYMBOLS else {}
+    full_market_regime = classify_market_regime_from_tickers(ticker_24h_map)
     log_stage("批量行情")
     universe = get_monitoring_universe(binance, bool(premium_map), ticker_24h_map, mode)
     log_stage("构建扫描池")
@@ -88,6 +89,8 @@ def main(
 
     enrich_market_context(evaluated)
     log_stage("历史上下文")
+    enrich_b_closed_1h_context(evaluated, binance)
+    log_stage("B模式1H收盘确认")
     ranked = sorted(evaluated, key=lambda item: item["risk_score"], reverse=True)[:TOP_N]
     append_history(evaluated, mode)
     save_market_snapshots(evaluated, scan_mode=mode)
@@ -95,7 +98,7 @@ def main(
 
     pattern_payload: dict[str, Any] | None = None
     if emit_outputs:
-        pattern_payload = run_pattern_monitor(evaluated)
+        pattern_payload = run_pattern_monitor(evaluated, market_regime=full_market_regime)
         log_stage("模式统计")
         push_pattern_signals(pattern_payload)
         log_stage("微信推送")
@@ -377,6 +380,64 @@ def process_symbol(
     return evaluate_snapshot(snapshot)
 
 
+def enrich_b_closed_1h_context(
+    items: list[dict[str, Any]],
+    binance: BinanceFuturesClient,
+) -> None:
+    """Fetch closed-hour confirmation only for current B candidates.
+
+    A full-market kline pass would add one REST request per scanned symbol.
+    Restricting the lookup to rows that already satisfy the B-mode predicate
+    keeps the normal scan latency essentially unchanged.
+    """
+    for item in items:
+        item["closed_1h_close"] = None
+        item["previous_closed_1h_close"] = None
+        item["closed_1h_close_time_utc"] = None
+        item["price_close_1h_confirmation"] = None
+
+    candidates = [
+        item
+        for item in items
+        if item.get("symbol")
+        and number(item.get("funding_rate")) <= -0.0003
+        and number(item.get("price_position_24h_pct")) >= 80
+        and number(item.get("price_change_24h_pct")) >= 10
+        and number(item.get("price_change_1h_pct")) > -3
+    ]
+    if not candidates:
+        return
+
+    workers = min(max(1, BINANCE_MAX_WORKERS), len(candidates), 8)
+    by_symbol = {str(item["symbol"]): item for item in candidates}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_symbol = {
+            executor.submit(binance.get_last_two_closed_1h_candles, symbol): symbol
+            for symbol in by_symbol
+        }
+        for future in as_completed(future_to_symbol):
+            symbol = future_to_symbol[future]
+            item = by_symbol[symbol]
+            try:
+                candle = future.result()
+                latest_close = float(candle["latest_close"])
+                previous_close = float(candle["previous_close"])
+                close_time = datetime.fromtimestamp(
+                    int(candle["latest_close_time_ms"]) / 1000,
+                    tz=timezone.utc,
+                ).isoformat()
+                item["closed_1h_close"] = latest_close
+                item["previous_closed_1h_close"] = previous_close
+                item["closed_1h_close_time_utc"] = close_time
+                item["price_close_1h_confirmation"] = latest_close <= previous_close
+            except Exception as error:
+                item.setdefault("warnings", []).append(f"1H 收盘确认暂不可用: {error}")
+
+    confirmed = sum(bool(item.get("price_close_1h_confirmation")) for item in candidates)
+    available = sum(item.get("price_close_1h_confirmation") is not None for item in candidates)
+    print(f"B模式1H收盘确认：候选 {len(candidates)}，可用 {available}，转弱 {confirmed}")
+
+
 def append_history(items: list[dict[str, Any]], scan_mode: str = "signal_scan") -> None:
     """把每轮快照追加到 CSV，方便后续做趋势和回测。"""
     HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -394,9 +455,17 @@ def append_history(items: list[dict[str, Any]], scan_mode: str = "signal_scan") 
         "price_change_1h_pct",
         "price_change_4h_pct",
         "price_change_24h_pct",
+        "closed_1h_close",
+        "previous_closed_1h_close",
+        "closed_1h_close_time_utc",
+        "price_close_1h_confirmation",
         "price_position_24h_pct",
         "quote_volume_24h",
         "quote_volume_change_24h_pct",
+        "cvd_1h",
+        "cvd_24h",
+        "cvd_ratio_1h",
+        "cvd_ratio_24h",
         "funding_same_sign_count",
         "funding_avg_abs_6",
         "long_liquidation_usd",
@@ -408,10 +477,24 @@ def append_history(items: list[dict[str, Any]], scan_mode: str = "signal_scan") 
         "scan_mode",
         "universe_reason",
     ]
-    with HISTORY_FILE.open("a", newline="", encoding="utf-8") as file:
-        active_fields = load_history_csv_fields(fields) if exists else fields
+    previous_rows: list[dict[str, Any]] = []
+    if exists:
+        with HISTORY_FILE.open("r", newline="", encoding="utf-8") as file:
+            previous_rows = list(csv.DictReader(file))
+        previous_fields = list(previous_rows[0].keys()) if previous_rows else []
+        active_fields = list(dict.fromkeys([*previous_fields, *fields]))
+    else:
+        active_fields = fields
+
+    # 旧版本 CSV 没有新增字段时，重写一次表头并保留历史行，避免新字段被
+    # DictWriter 的 extrasaction="ignore" 静默丢弃。
+    mode = "w" if exists and any(field not in (previous_rows[0].keys() if previous_rows else []) for field in fields) else "a"
+    with HISTORY_FILE.open(mode, newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=active_fields, extrasaction="ignore")
-        if not exists:
+        if mode == "w":
+            writer.writeheader()
+            writer.writerows(previous_rows)
+        elif not exists:
             writer.writeheader()
         timestamp_utc = datetime.now(timezone.utc).isoformat()
         for item in items:
@@ -429,9 +512,17 @@ def append_history(items: list[dict[str, Any]], scan_mode: str = "signal_scan") 
                     "price_change_1h_pct": item.get("price_change_1h_pct"),
                     "price_change_4h_pct": item.get("price_change_4h_pct"),
                     "price_change_24h_pct": item.get("price_change_24h_pct"),
+                    "closed_1h_close": item.get("closed_1h_close"),
+                    "previous_closed_1h_close": item.get("previous_closed_1h_close"),
+                    "closed_1h_close_time_utc": item.get("closed_1h_close_time_utc"),
+                    "price_close_1h_confirmation": item.get("price_close_1h_confirmation"),
                     "price_position_24h_pct": item.get("price_position_24h_pct"),
                     "quote_volume_24h": item.get("quote_volume_24h"),
                     "quote_volume_change_24h_pct": item.get("quote_volume_change_24h_pct"),
+                    "cvd_1h": item.get("cvd_1h"),
+                    "cvd_24h": item.get("cvd_24h"),
+                    "cvd_ratio_1h": item.get("cvd_ratio_1h"),
+                    "cvd_ratio_24h": item.get("cvd_ratio_24h"),
                     "funding_same_sign_count": item.get("funding_same_sign_count"),
                     "funding_avg_abs_6": item.get("funding_avg_abs_6"),
                     "long_liquidation_usd": item.get("long_liquidation_usd"),
@@ -465,11 +556,19 @@ def _failed_item(
         "price_change_1h_pct": None,
         "price_change_4h_pct": None,
         "price_change_24h_pct": None,
+        "closed_1h_close": None,
+        "previous_closed_1h_close": None,
+        "closed_1h_close_time_utc": None,
+        "price_close_1h_confirmation": None,
         "price_position_24h_pct": None,
         "high_24h": None,
         "low_24h": None,
         "quote_volume_24h": None,
         "quote_volume_change_24h_pct": None,
+        "cvd_1h": None,
+        "cvd_24h": None,
+        "cvd_ratio_1h": None,
+        "cvd_ratio_24h": None,
         "funding_same_sign_count": None,
         "funding_avg_abs_6": None,
         "long_liquidation_usd": 0.0,

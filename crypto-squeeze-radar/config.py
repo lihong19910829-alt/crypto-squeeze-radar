@@ -137,6 +137,10 @@ TRADING_ALLOWED_GRADES = _parse_trading_allowed_grades(
     os.getenv("TRADING_ALLOWED_GRADES", ",".join(DEFAULT_TRADING_ALLOWED_GRADES))
 )
 TRADING_REQUIRE_STAR = os.getenv("TRADING_REQUIRE_STAR", "true").lower() == "true"
+# Mode A is paused by default after the stable holdout review. When explicitly
+# re-enabled it still needs weak-market and price/CVD shadow confirmation.
+TRADING_MODE_A_ENABLED = os.getenv("TRADING_MODE_A_ENABLED", "false").lower() == "true"
+TRADING_RECONCILE_ENABLED = os.getenv("TRADING_RECONCILE_ENABLED", "true").lower() == "true"
 TRADING_PLACE_EXITS = os.getenv("TRADING_PLACE_EXITS", "true").lower() == "true"
 TRADING_POSITION_MODE = os.getenv("TRADING_POSITION_MODE", "one_way").lower()
 TRADING_RECV_WINDOW_MS = int(os.getenv("TRADING_RECV_WINDOW_MS", "5000"))

@@ -37,6 +37,10 @@ class MarketSnapshot:
     high_24h: float | None
     low_24h: float | None
     quote_volume_24h: float | None
+    cvd_1h: float | None
+    cvd_24h: float | None
+    cvd_ratio_1h: float | None
+    cvd_ratio_24h: float | None
     long_liquidation_usd: float | None
     short_liquidation_usd: float | None
     source: str
@@ -124,6 +128,39 @@ class BinanceFuturesClient:
         """获取近期强平订单。若交易所限制该接口，调用方会降级为 0。"""
         return self._get("/fapi/v1/allForceOrders", {"symbol": symbol, "limit": 100})
 
+    def get_taker_volume_history(self, symbol: str, period: str = "1h", limit: int = 24) -> list[dict[str, Any]]:
+        """获取主动买入/卖出量，用于计算 CVD。"""
+        return self._get(
+            "/futures/data/takerlongshortRatio",
+            {"symbol": symbol, "period": period, "limit": limit},
+        )
+
+    def get_last_two_closed_1h_candles(self, symbol: str) -> dict[str, Any]:
+        """Return the two latest fully closed 1h candles.
+
+        The endpoint also returns the currently forming candle.  Filtering by
+        close time prevents an intra-hour price move from being mistaken for a
+        confirmed hourly rollover.
+        """
+        rows = self._get(
+            "/fapi/v1/klines",
+            {"symbol": symbol, "interval": "1h", "limit": 3},
+        )
+        now_ms = int(time.time() * 1000)
+        closed = [row for row in rows if len(row) > 6 and int(row[6]) < now_ms]
+        if len(closed) < 2:
+            raise RuntimeError(f"{symbol} 缺少两根已收完的 1H K 线")
+        previous, latest = closed[-2], closed[-1]
+        previous_close = _to_float(previous[4])
+        latest_close = _to_float(latest[4])
+        if previous_close is None or latest_close is None:
+            raise RuntimeError(f"{symbol} 的 1H 收盘价无效")
+        return {
+            "previous_close": previous_close,
+            "latest_close": latest_close,
+            "latest_close_time_ms": int(latest[6]),
+        }
+
     def build_snapshot(
         self,
         coin: str,
@@ -147,6 +184,15 @@ class BinanceFuturesClient:
         price_change_24h_pct = _to_float(ticker_24h_data.get("priceChangePercent"))
         quote_volume_24h = _to_float(ticker_24h_data.get("quoteVolume"))
         price_position_24h_pct = _price_position(price, low_24h, high_24h)
+        cvd_1h, cvd_24h = None, None
+        cvd_ratio_1h, cvd_ratio_24h = None, None
+        try:
+            taker_volume = self.get_taker_volume_history(symbol, "1h", 24)
+            cvd_1h, cvd_24h, cvd_ratio_1h, cvd_ratio_24h = _cvd_from_taker_volume(
+                taker_volume
+            )
+        except RuntimeError as exc:
+            warnings.append(f"CVD 暂不可用: {exc}")
         # The latest OI history row already contains the current aggregate OI
         # and the values used for the 1h/24h changes. Reusing it removes one
         # REST request per symbol without changing the push-facing OI changes.
@@ -195,6 +241,10 @@ class BinanceFuturesClient:
             high_24h=high_24h,
             low_24h=low_24h,
             quote_volume_24h=quote_volume_24h,
+            cvd_1h=cvd_1h,
+            cvd_24h=cvd_24h,
+            cvd_ratio_1h=cvd_ratio_1h,
+            cvd_ratio_24h=cvd_ratio_24h,
             long_liquidation_usd=long_liq,
             short_liquidation_usd=short_liq,
             source="binance",
@@ -235,6 +285,31 @@ def _latest_open_interest(rows: list[dict[str, Any]]) -> float | None:
     if not rows:
         return None
     return _to_float(rows[-1].get("sumOpenInterest"))
+
+
+def _cvd_from_taker_volume(
+    rows: list[dict[str, Any]],
+) -> tuple[float | None, float | None, float | None, float | None]:
+    """计算原始 CVD 及可跨币种比较的主动成交量差值比例。"""
+    if not rows:
+        return None, None, None, None
+    deltas: list[float] = []
+    totals: list[float] = []
+    for row in rows:
+        buy = _to_float(row.get("buyVol"))
+        sell = _to_float(row.get("sellVol"))
+        if buy is None or sell is None:
+            continue
+        deltas.append(buy - sell)
+        totals.append(buy + sell)
+    if not deltas:
+        return None, None, None, None
+    cvd_1h = deltas[-1]
+    cvd_24h = sum(deltas)
+    ratio_1h = cvd_1h / totals[-1] if totals[-1] > 0 else None
+    total_24h = sum(totals)
+    ratio_24h = cvd_24h / total_24h if total_24h > 0 else None
+    return cvd_1h, cvd_24h, ratio_1h, ratio_24h
 
 
 def _latest_oi_value(rows: list[dict[str, Any]]) -> float | None:

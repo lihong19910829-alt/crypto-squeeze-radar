@@ -1,0 +1,192 @@
+{
+  "meta": {
+    "rows": 266152,
+    "symbols": 533,
+    "data_limitations": [
+      "现有数据库为小时级快照；price 被用作小时收盘/开盘代理。",
+      "没有逐小时成交量时，成交量条件使用 quote_volume_24h 的20小时均值代理。",
+      "没有15分钟数据和OHLC时，版本C CHOCH不可计算；版本B使用价格跌破信号价格代理。",
+      "未设置止损止盈；按持仓小时数定时退出，收益未扣手续费/滑点。"
+    ]
+  },
+  "analysis": {
+    "failure_counts": {
+      "强趋势继续上涨": 13,
+      "其他": 0
+    },
+    "notes": [
+      "当前数据没有逐笔OI/Funding/15分钟结构，失败归因以持仓期价格上涨为主；同一事件在不同参数组合中的重复结果已去重。"
+    ]
+  },
+  "trades": [
+    {
+      "label": "p20_oi20_fund0.05_stall0_vol80_A_6h",
+      "symbol": "ONUSDT",
+      "stage1_time": "2026-07-23T00:02:06.677478+00:00",
+      "signal_time": "2026-07-24T06:03:53.798370+00:00",
+      "entry_time": "2026-07-24T07:02:24.756943+00:00",
+      "exit_time": "2026-07-24T13:02:41.427223+00:00",
+      "entry_price": 0.16684935,
+      "exit_price": 0.19907083,
+      "return_pct": -19.31172042324408,
+      "hold_hours": 6.004630633333333,
+      "failure_reason": "new_high;oi6=-0.89;volume=75.1(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p20_oi10_fund0.05_stall5_vol80_A_6h",
+      "symbol": "AVAAIUSDT",
+      "stage1_time": "2026-07-17T23:01:56.822096+00:00",
+      "signal_time": "2026-07-19T19:02:03.460646+00:00",
+      "entry_time": "2026-07-19T20:02:51.199927+00:00",
+      "exit_time": "2026-07-20T03:01:57.655373+00:00",
+      "entry_price": 0.0096771,
+      "exit_price": 0.01094798,
+      "return_pct": -13.132860051048356,
+      "hold_hours": 6.985126512777778,
+      "failure_reason": "new_high;oi6=2.65;volume=57.3(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p20_oi10_fund0.05_stall0_vol80_A_12h",
+      "symbol": "JCTUSDT",
+      "stage1_time": "2026-07-13T11:06:29.250394+00:00",
+      "signal_time": "2026-07-14T23:02:29.751133+00:00",
+      "entry_time": "2026-07-15T04:02:34.436722+00:00",
+      "exit_time": "2026-07-15T19:02:33.108025+00:00",
+      "entry_price": 0.00423641,
+      "exit_price": 0.00463469,
+      "return_pct": -9.401356337087297,
+      "hold_hours": 14.999630917500001,
+      "failure_reason": "new_high;oi6=-0.32;volume=52.0(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p40_oi10_fund0.05_stall5_vol80_A_6h",
+      "symbol": "VELVETUSDT",
+      "stage1_time": "2026-06-27T14:25:02.145157+00:00",
+      "signal_time": "2026-06-28T20:01:51.249471+00:00",
+      "entry_time": "2026-06-28T21:01:55.146728+00:00",
+      "exit_time": "2026-06-29T04:01:52.264735+00:00",
+      "entry_price": 1.79556218,
+      "exit_price": 1.91117997,
+      "return_pct": -6.439085835501402,
+      "hold_hours": 6.999199446388889,
+      "failure_reason": "new_high;oi6=4.95;volume=77.1(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p20_oi10_fund0.05_stall0_vol80_A_24h",
+      "symbol": "JCTUSDT",
+      "stage1_time": "2026-07-13T11:06:29.250394+00:00",
+      "signal_time": "2026-07-14T23:02:29.751133+00:00",
+      "entry_time": "2026-07-15T04:02:34.436722+00:00",
+      "exit_time": "2026-07-16T05:01:58.195544+00:00",
+      "entry_price": 0.00423641,
+      "exit_price": 0.0044555,
+      "return_pct": -5.171595761505611,
+      "hold_hours": 24.989933006111112,
+      "failure_reason": "new_high;oi6=-0.32;volume=52.0(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p20_oi10_fund0.05_stall0_vol80_A_6h",
+      "symbol": "JCTUSDT",
+      "stage1_time": "2026-07-13T11:06:29.250394+00:00",
+      "signal_time": "2026-07-14T23:02:29.751133+00:00",
+      "entry_time": "2026-07-15T04:02:34.436722+00:00",
+      "exit_time": "2026-07-15T14:02:33.920329+00:00",
+      "entry_price": 0.00423641,
+      "exit_price": 0.00445363,
+      "return_pct": -5.127454613694135,
+      "hold_hours": 9.999856557500001,
+      "failure_reason": "new_high;oi6=-0.32;volume=52.0(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p20_oi10_fund0.05_stall0_vol80_A_48h",
+      "symbol": "OUSDT",
+      "stage1_time": "2026-06-28T08:01:51.835380+00:00",
+      "signal_time": "2026-06-29T16:02:02.089295+00:00",
+      "entry_time": "2026-06-29T17:02:03.419342+00:00",
+      "exit_time": "2026-07-12T00:02:36.360530+00:00",
+      "entry_price": 0.53698037,
+      "exit_price": 0.5640601,
+      "return_pct": -5.0429646059501145,
+      "hold_hours": 295.00915032999995,
+      "failure_reason": "new_high;oi6=-15.97;volume=61.7(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p30_oi10_fund0.05_stall0_vol80_B_24h",
+      "symbol": "USUSDT",
+      "stage1_time": "2026-07-15T19:02:33.108025+00:00",
+      "signal_time": "2026-07-17T15:05:16.355412+00:00",
+      "entry_time": "2026-07-17T17:02:01.793874+00:00",
+      "exit_time": "2026-07-18T17:03:00.172041+00:00",
+      "entry_price": 0.045551,
+      "exit_price": 0.04772337,
+      "return_pct": -4.769093982568988,
+      "hold_hours": 24.0162161575,
+      "failure_reason": "new_high;oi6=-0.65;volume=45.6(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p20_oi20_fund0.05_stall5_vol80_A_12h",
+      "symbol": "AVAAIUSDT",
+      "stage1_time": "2026-07-17T23:01:56.822096+00:00",
+      "signal_time": "2026-07-19T19:02:03.460646+00:00",
+      "entry_time": "2026-07-19T20:02:51.199927+00:00",
+      "exit_time": "2026-07-20T09:01:54.978508+00:00",
+      "entry_price": 0.0096771,
+      "exit_price": 0.01005821,
+      "return_pct": -3.9382666294654443,
+      "hold_hours": 12.984382939166666,
+      "failure_reason": "new_high;oi6=2.65;volume=57.3(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p30_oi10_fund0.05_stall0_vol80_B_12h",
+      "symbol": "USUSDT",
+      "stage1_time": "2026-07-15T19:02:33.108025+00:00",
+      "signal_time": "2026-07-17T15:05:16.355412+00:00",
+      "entry_time": "2026-07-17T17:02:01.793874+00:00",
+      "exit_time": "2026-07-18T10:29:37.523268+00:00",
+      "entry_price": 0.045551,
+      "exit_price": 0.04666566,
+      "return_pct": -2.4470593400803415,
+      "hold_hours": 17.45992483166667,
+      "failure_reason": "new_high;oi6=-0.65;volume=45.6(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p30_oi10_fund0.05_stall0_vol80_A_6h",
+      "symbol": "USUSDT",
+      "stage1_time": "2026-07-15T19:02:33.108025+00:00",
+      "signal_time": "2026-07-17T15:05:16.355412+00:00",
+      "entry_time": "2026-07-17T16:04:34.090418+00:00",
+      "exit_time": "2026-07-17T23:01:56.822096+00:00",
+      "entry_price": 0.04692264,
+      "exit_price": 0.04803804,
+      "return_pct": -2.3771041015594934,
+      "hold_hours": 6.956314355,
+      "failure_reason": "new_high;oi6=-0.65;volume=45.6(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p30_oi10_fund0.05_stall0_vol80_A_24h",
+      "symbol": "USUSDT",
+      "stage1_time": "2026-07-15T19:02:33.108025+00:00",
+      "signal_time": "2026-07-17T15:05:16.355412+00:00",
+      "entry_time": "2026-07-17T16:04:34.090418+00:00",
+      "exit_time": "2026-07-18T17:03:00.172041+00:00",
+      "entry_price": 0.04692264,
+      "exit_price": 0.04772337,
+      "return_pct": -1.7064896604283124,
+      "hold_hours": 24.973911561944448,
+      "failure_reason": "new_high;oi6=-0.65;volume=45.6(quote_volume_24h_proxy)"
+    },
+    {
+      "label": "p20_oi10_fund0.05_stall0_vol80_A_12h",
+      "symbol": "OUSDT",
+      "stage1_time": "2026-06-28T08:01:51.835380+00:00",
+      "signal_time": "2026-06-29T16:02:02.089295+00:00",
+      "entry_time": "2026-06-29T17:02:03.419342+00:00",
+      "exit_time": "2026-06-30T06:02:25.297296+00:00",
+      "entry_price": 0.53698037,
+      "exit_price": 0.54286935,
+      "return_pct": -1.0966844095250714,
+      "hold_hours": 13.006077209444445,
+      "failure_reason": "new_high;oi6=-15.97;volume=61.7(quote_volume_24h_proxy)"
+    }
+  ]
+}

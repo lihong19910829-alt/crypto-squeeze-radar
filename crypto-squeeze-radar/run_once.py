@@ -50,6 +50,23 @@ def main() -> None:
             f"[{now()}] 交易层审计：来源 {summary['source']}，"
             f"候选 {summary['candidate_signals']}，过滤 {summary['filtered_reasons']}"
         )
+        if summary.get("tp1_protection_checked"):
+            print(
+                f"[{now()}] TP1成本保护：核对 {summary['tp1_protection_checked']}，"
+                f"启用 {summary['tp1_protection_activated']}，"
+                f"错误 {summary['tp1_protection_errors']}"
+            )
+        for detail in summary.get("tp1_protection_error_details") or []:
+            print(f"[{now()}] TP1成本保护异常：{detail}")
+        reconciliation = summary.get("reconciliation")
+        if reconciliation:
+            if reconciliation.get("error"):
+                print(f"[{now()}] 成交对账失败：{reconciliation['error']}")
+            else:
+                print(
+                    f"[{now()}] 成交对账：本轮核对 {reconciliation['reconciled']}，"
+                    f"状态 {reconciliation['status_counts']}"
+                )
     else:
         print(f"[{now()}] 已跳过交易层：TRADING_AUTO_EXECUTE=false")
 

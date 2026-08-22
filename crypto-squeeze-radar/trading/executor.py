@@ -19,11 +19,13 @@ from config import (
     TRADING_LEVERAGE_MODE,
     TRADING_MARKET,
     TRADING_MAX_OPEN_POSITIONS,
+    TRADING_MODE_A_ENABLED,
     TRADING_MIN_NOTIONAL_USDT,
     TRADING_ORDER_PREFIX,
     TRADING_PLACE_EXITS,
     TRADING_POSITION_MODE,
     TRADING_REQUIRE_STAR,
+    TRADING_RECONCILE_ENABLED,
     TRADING_RISK_PCT,
     TRADING_SIDE,
     TRADING_SIGNALS_FILE,
@@ -36,18 +38,31 @@ from trading.binance_futures import (
 from trading.store import (
     due_open_decisions,
     existing_signal_ids,
+    mark_decision_unprotected,
+    open_protection_decisions,
     open_local_decision_count,
     open_local_symbols,
     save_decision,
     update_decision_close,
+    update_decision_protection,
 )
-from patterns.oi_pattern_monitor import annotate_trade_plan_metadata
+from patterns.oi_pattern_monitor import (
+    STRATEGY_CONFIG_HASH,
+    STRATEGY_REVISION,
+    annotate_trade_plan_metadata,
+)
+from trading.reconciliation import backfill_and_reconcile
 
 
 SHORT_PATTERN_KEYS = {
     "oi_4h_short_reversal",
     "high_neg_funding_12h_short",
     "short_crowd_high_volume_12h_short",
+}
+
+# B 是主交易模式；C 只给同一时刻的 B 增加放量确认，不独立开仓。
+CANDIDATE_TRADE_PATTERN_KEYS = {
+    "high_neg_funding_12h_short",
 }
 
 
@@ -70,6 +85,13 @@ def run_trading_cycle(
     exchange_rules = build_symbol_rules(client.exchange_info()) if client and not TRADING_DRY_RUN else {}
     equity = account_equity(client) if client and not TRADING_DRY_RUN else Decimal("1000")
     position_rows = client.position_risk() if client and not TRADING_DRY_RUN else []
+    protection = manage_tp1_breakeven_protection(
+        run_id=run_id,
+        client=client,
+        position_mode=position_mode,
+        position_rows=position_rows,
+        exchange_rules=exchange_rules,
+    )
     expiry = expire_due_positions(
         run_id=run_id,
         client=client,
@@ -84,6 +106,10 @@ def run_trading_cycle(
                 open_count = max(0, open_count - 1)
             # Do not immediately reopen the same symbol in this cycle while
             # the exchange position snapshot is still from before the close.
+            open_symbols.add(symbol)
+        for symbol in protection["closed_symbols"]:
+            if symbol in open_symbols:
+                open_count = max(0, open_count - 1)
             open_symbols.add(symbol)
     else:
         open_symbols = open_local_symbols()
@@ -103,10 +129,15 @@ def run_trading_cycle(
         "signals_seen": len(rows),
         "submitted": 0,
         "skipped": 0,
-        "errors": 0,
+        "errors": expiry["errors"] + protection["errors"],
         "time_exit_checked": expiry["checked"],
         "time_exit_closed": expiry["closed"],
         "time_exit_errors": expiry["errors"],
+        "tp1_protection_checked": protection["checked"],
+        "tp1_protection_activated": protection["activated"],
+        "tp1_protection_closed": protection["closed"],
+        "tp1_protection_errors": protection["errors"],
+        "tp1_protection_error_details": protection["error_details"],
     }
 
     for row in rows:
@@ -142,6 +173,18 @@ def run_trading_cycle(
             decision = base_decision(run_id, row)
             decision.update({"status": "ERROR", "reason": str(error)})
             save_decision(decision)
+            summary["errors"] += 1
+
+    summary["reconciliation"] = None
+    if client and not TRADING_DRY_RUN and TRADING_RECONCILE_ENABLED:
+        try:
+            summary["reconciliation"] = backfill_and_reconcile(
+                client,
+                only_unreconciled=True,
+                include_open=False,
+            )
+        except Exception as error:
+            summary["reconciliation"] = {"error": str(error)}
             summary["errors"] += 1
 
     return summary
@@ -180,13 +223,34 @@ def should_trade(row: dict[str, Any]) -> bool:
 def trade_reject_reason(row: dict[str, Any]) -> str | None:
     if TRADING_SIDE != "SHORT" or row.get("entry_side") != "SHORT":
         return "方向不是 SHORT"
+    if (
+        row.get("strategy_revision") != STRATEGY_REVISION
+        or row.get("strategy_config_hash") != STRATEGY_CONFIG_HASH
+    ):
+        return "信号规则版本已过期，等待下一轮扫描"
     if TRADING_ALLOWED_SYMBOLS and str(row.get("symbol", "")).upper() not in TRADING_ALLOWED_SYMBOLS:
         return "不在允许交易品种"
-    if TRADING_REQUIRE_STAR and not row.get("is_star"):
+    pattern_key = str(row.get("pattern_key") or "")
+    if pattern_key == "short_crowd_high_volume_12h_short":
+        return "模式C仅作为模式B增强确认"
+    if pattern_key == "oi_4h_short_reversal" and not TRADING_MODE_A_ENABLED:
+        return "模式A已暂停"
+    try:
+        if Decimal(str(row.get("position_multiplier") or "0")) <= 0:
+            return "仓位系数为0，仅记录"
+    except (ArithmeticError, ValueError):
+        return "仓位系数无效"
+    candidate_trade = pattern_key in CANDIDATE_TRADE_PATTERN_KEYS
+    if TRADING_REQUIRE_STAR and not row.get("is_star") and not candidate_trade:
         return "未标星"
     # A star is the final strategy-layer approval. Do not let a stale or
     # differently encoded grade setting silently block a starred signal.
-    if TRADING_ALLOWED_GRADES and not row.get("is_star") and row.get("trade_grade") not in TRADING_ALLOWED_GRADES:
+    if (
+        TRADING_ALLOWED_GRADES
+        and not row.get("is_star")
+        and not candidate_trade
+        and row.get("trade_grade") not in TRADING_ALLOWED_GRADES
+    ):
         return f"等级不允许：{row.get('trade_grade')}"
     return None
 
@@ -274,6 +338,190 @@ def current_open_position_state_from_rows(
         elif amount != 0:
             count += 1
     return count, symbols
+
+
+def manage_tp1_breakeven_protection(
+    run_id: str,
+    client: BinanceFuturesTradingClient | None,
+    position_mode: str,
+    position_rows: list[dict[str, Any]],
+    exchange_rules: dict[str, dict[str, Decimal]],
+) -> dict[str, Any]:
+    """Move the remaining B position stop after TP1 has reduced its size.
+
+    The exchange position quantity is used as the source of truth.  Once it is
+    at or below the expected post-TP1 remainder, the original stop is replaced
+    with a cost-protection stop.  Existing trades created before this rule do
+    not opt in and are left untouched.
+    """
+    result = {
+        "checked": 0,
+        "activated": 0,
+        "closed": 0,
+        "errors": 0,
+        "error_details": [],
+        "closed_symbols": set(),
+    }
+    if client is None:
+        return result
+
+    positions = {
+        str(row.get("symbol") or "").upper(): row
+        for row in position_rows
+        if position_amount(row, position_mode) > 0
+    }
+    now = datetime.now(timezone.utc)
+    handled_symbols: set[str] = set()
+    for decision in open_protection_decisions(TRADING_DB_FILE):
+        raw_signal = json_object(decision.get("raw_signal"))
+        if not raw_signal.get("move_stop_to_breakeven_after_tp1"):
+            continue
+        due = parse_datetime_or_none(decision.get("time_exit_due_utc"))
+        if due is not None and due <= now:
+            continue
+
+        symbol = str(decision.get("symbol") or "").upper()
+        if not symbol or symbol in handled_symbols:
+            continue
+        handled_symbols.add(symbol)
+        result["checked"] += 1
+        position = positions.get(symbol)
+        if position is None:
+            continue
+
+        rules = exchange_rules.get(symbol, {})
+        step_size = rules.get("step_size", Decimal("0.001"))
+        current_quantity = floor_to_step(position_amount(position, position_mode), step_size)
+        initial_quantity = Decimal(str(decision.get("quantity") or "0"))
+        if current_quantity <= 0 or initial_quantity <= 0:
+            continue
+        first_close_pct = Decimal(
+            str(raw_signal.get("first_take_profit_close_pct") or "50")
+        ) / Decimal("100")
+        first_quantity = floor_to_step(initial_quantity * first_close_pct, step_size)
+        expected_remainder = max(Decimal("0"), initial_quantity - first_quantity)
+        if current_quantity > expected_remainder + step_size:
+            continue
+
+        try:
+            entry_price = Decimal(
+                str(position.get("entryPrice") or decision.get("entry_price") or "0")
+            )
+            mark_price = Decimal(str(position.get("markPrice") or "0"))
+            original_stop = Decimal(str(decision.get("stop_loss_price") or "0"))
+            if entry_price <= 0 or original_stop <= entry_price:
+                raise ValueError(f"{symbol} 缺少有效入场价或原止损价")
+
+            buffer_pct = Decimal(str(raw_signal.get("breakeven_buffer_pct") or "0.3"))
+            target_stop = entry_price * (Decimal("1") - buffer_pct / Decimal("100"))
+            # If the hourly manager sees the position after price has already
+            # crossed the ideal protection level, place a near-market guard
+            # instead of submitting an invalid trigger below the current mark.
+            if mark_price > 0 and mark_price >= target_stop:
+                target_stop = mark_price * Decimal("1.003")
+            if target_stop >= original_stop:
+                # The original stop is already tighter than a late replacement.
+                continue
+
+            responses = json_object(decision.get("exchange_response"))
+            old_stop = responses.get("stop")
+            old_algo_id = old_stop.get("algoId") if isinstance(old_stop, dict) else None
+            if old_algo_id:
+                try:
+                    responses["stop_cancel_before_breakeven"] = client.cancel_algo_order(
+                        symbol,
+                        int(old_algo_id),
+                    )
+                except Exception as error:
+                    responses["stop_cancel_before_breakeven"] = {"error": str(error)}
+
+            stop_client_id = client_order_id_from_run(run_id, symbol, "be-stop")
+            try:
+                new_stop = client.algo_order(
+                    algo_order_params(
+                        algo_type="CONDITIONAL",
+                        symbol=symbol,
+                        side="BUY",
+                        order_type="STOP_MARKET",
+                        quantity=current_quantity,
+                        client_id=stop_client_id,
+                        stop_price=target_stop,
+                        reduce_only=True,
+                        position_mode=position_mode,
+                        tick_size=rules.get("tick_size", Decimal("0")),
+                    )
+                )
+                if not new_stop.get("algoId"):
+                    raise RuntimeError("成本保护止损未返回 algoId")
+            except Exception as protection_error:
+                rollback_client_id = client_order_id_from_run(run_id, symbol, "sl-rearm")
+                try:
+                    rollback = client.algo_order(
+                        algo_order_params(
+                            algo_type="CONDITIONAL",
+                            symbol=symbol,
+                            side="BUY",
+                            order_type="STOP_MARKET",
+                            quantity=current_quantity,
+                            client_id=rollback_client_id,
+                            stop_price=original_stop,
+                            reduce_only=True,
+                            position_mode=position_mode,
+                            tick_size=rules.get("tick_size", Decimal("0")),
+                        )
+                    )
+                    responses["stop"] = rollback
+                    responses["breakeven_error"] = str(protection_error)
+                    update_decision_protection(
+                        decision["signal_id"],
+                        rollback_client_id,
+                        "ORIGINAL_REARMED",
+                        None,
+                        responses,
+                        TRADING_DB_FILE,
+                    )
+                except Exception as rollback_error:
+                    failure = RuntimeError(
+                        f"成本保护止损失败且原止损恢复失败：{protection_error}；{rollback_error}"
+                    )
+                    responses["breakeven_error"] = str(protection_error)
+                    responses["stop_rearm_error"] = str(rollback_error)
+                    mark_decision_unprotected(
+                        decision["signal_id"],
+                        str(failure),
+                        responses,
+                        TRADING_DB_FILE,
+                    )
+                    raise failure from rollback_error
+                result["errors"] += 1
+                result["error_details"].append(
+                    f"{symbol}: 成本保护替换失败，已恢复原止损：{protection_error}"
+                )
+                continue
+
+            responses["stop_before_breakeven"] = old_stop
+            responses["stop"] = new_stop
+            responses["breakeven_management"] = {
+                "activated_at_utc": now.isoformat(),
+                "entry_price": decimal_text(entry_price),
+                "mark_price": decimal_text(mark_price),
+                "trigger_price": decimal_text(target_stop),
+                "remaining_quantity": decimal_text(current_quantity),
+                "buffer_pct": decimal_text(buffer_pct),
+            }
+            update_decision_protection(
+                decision["signal_id"],
+                stop_client_id,
+                "BREAKEVEN_ACTIVE",
+                float(target_stop),
+                responses,
+                TRADING_DB_FILE,
+            )
+            result["activated"] += 1
+        except Exception as error:
+            result["errors"] += 1
+            result["error_details"].append(f"{symbol}: {error}")
+    return result
 
 
 def expire_due_positions(
@@ -424,8 +672,10 @@ def build_order_plan(
         raise ValueError(f"计算后的名义金额低于最小值 {min_notional} USDT")
     margin_usdt = notional / Decimal(str(leverage))
 
-    first_close_pct = Decimal(str(row.get("first_take_profit_close_pct") or "50")) / Decimal("100")
-    final_close_pct = Decimal(str(row.get("final_take_profit_close_pct") or "30")) / Decimal("100")
+    first_close_value = row.get("first_take_profit_close_pct")
+    final_close_value = row.get("final_take_profit_close_pct")
+    first_close_pct = Decimal(str(50 if first_close_value is None else first_close_value)) / Decimal("100")
+    final_close_pct = Decimal(str(50 if final_close_value is None else final_close_value)) / Decimal("100")
     first_qty = floor_to_step(quantity * first_close_pct, step_size)
     final_qty = floor_to_step(quantity * final_close_pct, step_size)
 
@@ -672,6 +922,7 @@ def signal_key(row: dict[str, Any]) -> str:
     return "|".join(
         [
             str(row.get("pattern_version") or ""),
+            str(row.get("strategy_config_hash") or ""),
             str(row.get("timestamp_utc") or ""),
             str(row.get("pattern_key") or ""),
             str(row.get("symbol") or ""),
@@ -728,6 +979,30 @@ def order_response_time(response: Any) -> datetime | None:
     try:
         return datetime.fromtimestamp(float(timestamp) / 1000, tz=timezone.utc)
     except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def parse_datetime_or_none(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
         return None
 
 

@@ -90,6 +90,7 @@ def load_latest_snapshots() -> list[dict[str, object]]:
                oi_change_1h, oi_change_24h, long_liquidation, short_liquidation,
                price_change_1h, price_change_4h, price_change_24h,
                price_position_24h, quote_volume_24h, quote_volume_change_24h,
+               cvd_1h, cvd_24h,
                funding_same_sign_count, funding_avg_abs_6,
                risk_score, anomaly_tag, source, scan_mode, universe_reason
         FROM market_snapshots
@@ -184,6 +185,7 @@ def load_history(limit: int) -> list[dict[str, object]]:
                    oi_change_1h, oi_change_24h, long_liquidation, short_liquidation,
                    price_change_1h, price_change_4h, price_change_24h,
                    price_position_24h, quote_volume_24h, quote_volume_change_24h,
+                   cvd_1h, cvd_24h,
                    funding_same_sign_count, funding_avg_abs_6,
                    risk_score, anomaly_tag, source, scan_mode, universe_reason
             FROM market_snapshots

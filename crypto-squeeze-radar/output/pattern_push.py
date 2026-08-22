@@ -18,9 +18,9 @@ from config import (
 
 
 PATTERN_SECTIONS = [
-    ("oi_4h_short_reversal", "A加强版：高位OI异常4H空（4%止损，3%/7%止盈）"),
-    ("high_neg_funding_12h_short", "B：高位负Funding12H空（确认层分档止损，8%/13%止盈）"),
-    ("short_crowd_high_volume_12h_short", "C：空头拥挤高位放量12H空（确认层分档止损，8%/13%止盈）"),
+    ("oi_4h_short_reversal", "A观察：高位OI异常4H空（默认暂停自动开仓）"),
+    ("high_neg_funding_12h_short", "B：高位负Funding12H空（未确认6%/10%，1H收盘转弱8%/13%止盈）"),
+    ("short_crowd_high_volume_12h_short", "C增强：仅确认同币种B，不独立开仓"),
 ]
 
 
@@ -72,15 +72,21 @@ def format_pattern_message(payload: dict[str, Any]) -> str:
             reverse=True,
         )
         starred_rows = [row for row in rows if is_star_signal(row)]
-        lines.append(f"{label}：命中 {len(rows)}，标星 {len(starred_rows)}")
+        oi_volume_double_count = sum(is_oi_volume_double_confirmation(row) for row in rows)
+        lines.append(
+            f"{label}：命中 {len(rows)}，标星 {len(starred_rows)}，"
+            f"OI+成交额双确认 {oi_volume_double_count}"
+        )
         if rows:
             lines.extend(format_trade_table(rows[:8]))
         else:
             lines.append("  无命中")
         lines.append("")
 
-    lines.append("交易分级：主交易1.0x；可交易0.8x；小仓确认0.25x；观察0x。")
-    lines.append("确认层：高位≥90%且24h涨幅≥20%且成交额放大≥50%，或高位≥70%且涨幅≥20%并满足空头拥挤/负Funding。")
+    lines.append("B仓位：OI+量双确认1.0x；Funding≤-0.10%时0.8x；其余B仅记录、不自动开仓；C增强/观察0x。")
+    lines.append("星标质量层：高位≥90%且24h涨幅≥20%且成交额放大≥50%，或高位≥70%且涨幅≥20%并满足空头拥挤/负Funding。")
+    lines.append("价/CVD：最近两根已收盘1H K线停止创新高；价格确认后归一化1H CVD<0计第二确认，仅决定止盈档位。")
+    lines.append("OI+量双：24h OI增幅≥20%且24h成交额增幅≥100%；满足时B使用1.0x。")
     lines.append("仅用于市场结构观察，不构成投资建议。")
     return "\n".join(lines).strip()
 
@@ -206,7 +212,7 @@ def format_trade_lines(row: dict[str, Any]) -> list[str]:
 def format_trade_table(rows: list[dict[str, Any]]) -> list[str]:
     lines = [
         "```",
-        "星 品种    仓位 止损        TP1         TP2         持仓",
+        "星 品种    仓位 价/CVD OI+量双 止损        TP1         TP2         持仓",
     ]
     for row in rows:
         lines.append(format_trade_table_row(row))
@@ -225,9 +231,12 @@ def format_trade_table_row(row: dict[str, Any]) -> str:
     hold_hours = int(number(row.get("max_hold_hours")) or 4)
     grade = str(row.get("trade_grade") or ("可交易" if is_star_signal(row) else "观察"))
     close_rule = format_close_rule(row)
+    price_cvd_confirmation = format_price_cvd_confirmation(row)
+    oi_volume_double = "是" if is_oi_volume_double_confirmation(row) else "否"
     return (
         f"{star} {coin_from_display(str(coin)):<7} "
-        f"{multiplier:.2f}x {format_price(stop):<11} "
+        f"{multiplier:.2f}x {price_cvd_confirmation:<6} {oi_volume_double:<4} "
+        f"{format_price(stop):<11} "
         f"{format_price(first_tp):<11} {format_price(final_tp):<11} "
         f"{hold_hours}H {grade} {close_rule}"
     )
@@ -237,18 +246,58 @@ def coin_from_display(value: str) -> str:
     return value[:7]
 
 
+def format_price_cvd_confirmation(row: dict[str, Any]) -> str:
+    count = int(number(row.get("shadow_confirmation_count")))
+    if count >= 2:
+        return "双"
+    if count == 1:
+        return "单"
+    return "无"
+
+
+def is_oi_volume_double_confirmation(row: dict[str, Any]) -> bool:
+    if row.get("oi_volume_double_confirmation") is not None:
+        return bool(row.get("oi_volume_double_confirmation"))
+    return (
+        number(row.get("oi_change_24h")) >= 20
+        and number(row.get("quote_volume_change_24h")) >= 100
+    )
+
+
 def format_close_rule(row: dict[str, Any]) -> str:
-    first = int(number(row.get("first_take_profit_close_pct")) or 50)
-    final = int(number(row.get("final_take_profit_close_pct")) or 30)
-    time_exit = int(number(row.get("time_exit_close_pct")) or 20)
+    first_value = number(row.get("first_take_profit_close_pct"))
+    final_value = number(row.get("final_take_profit_close_pct"))
+    time_value = number(row.get("time_exit_close_pct"))
+    first = int(50 if first_value is None else first_value)
+    final = int(50 if final_value is None else final_value)
+    time_exit = int(0 if time_value is None else time_value)
     return f"{first}/{final}/{time_exit}"
 
 
 def is_star_signal(row: dict[str, Any]) -> bool:
     if row.get("is_star") is not None:
         return bool(row.get("is_star"))
+    regime = str(row.get("market_regime") or "")
+    pattern_key = str(row.get("pattern_key") or "")
     if is_strong_reaction_signal(row):
-        return True
+        if regime != "strong":
+            return True
+        return (
+            pattern_key in {
+                "high_neg_funding_12h_short",
+                "short_crowd_high_volume_12h_short",
+            }
+            and number(row.get("price_position_24h")) >= 80
+            and number(row.get("price_change_24h")) >= 20
+            and (
+                (pattern_key == "high_neg_funding_12h_short" and number(row.get("funding_rate")) <= -0.0005)
+                or (
+                    pattern_key == "short_crowd_high_volume_12h_short"
+                    and "空头拥挤" in str(row.get("anomaly_tag") or "")
+                    and number(row.get("quote_volume_change_24h")) >= 100
+                )
+            )
+        )
 
     side = str(row.get("entry_side") or "")
     score = number(row.get("short_setup_score"))
@@ -257,13 +306,27 @@ def is_star_signal(row: dict[str, Any]) -> bool:
         return False
 
     probability = number(row.get("down_probability_pct"))
-    return (
+    base_star = (
         side == "SHORT"
         and score >= 65
         and sample_count >= 15
         and probability >= 55
         and number(row.get("price_change_1h")) > -3
-        and str(row.get("market_regime") or "") != "strong"
+    )
+    if not base_star:
+        return False
+    if regime != "strong":
+        return True
+    return pattern_key in {
+        "high_neg_funding_12h_short",
+        "short_crowd_high_volume_12h_short",
+    } and number(row.get("price_position_24h")) >= 80 and number(row.get("price_change_24h")) >= 20 and (
+        (pattern_key == "high_neg_funding_12h_short" and number(row.get("funding_rate")) <= -0.0005)
+        or (
+            pattern_key == "short_crowd_high_volume_12h_short"
+            and "空头拥挤" in str(row.get("anomaly_tag") or "")
+            and number(row.get("quote_volume_change_24h")) >= 100
+        )
     )
 
 
